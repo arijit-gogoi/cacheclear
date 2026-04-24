@@ -6,10 +6,33 @@
 
 use crate::manager::{Manager, ManagerResult, Plan, RunCtx};
 use async_trait::async_trait;
+use std::path::PathBuf;
 use std::time::Instant;
 use tokio::process::Command;
 
 pub struct Pip;
+
+/// Discover pip's cache dir by shelling `pip cache dir` (or pip3 fallback).
+async fn discover_cache_dir() -> Option<PathBuf> {
+    let name = pip_binary()?;
+    let bin = which::which(name).ok()?;
+    let output = Command::new(&bin)
+        .args(["cache", "dir"])
+        .kill_on_drop(true)
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8(output.stdout).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
+}
 
 /// Return the first of `pip` / `pip3` found on PATH, or `None`.
 fn pip_binary() -> Option<&'static str> {
@@ -37,6 +60,10 @@ impl Manager for Pip {
             description: "run `pip cache purge`".into(),
             paths: vec![],
         }
+    }
+
+    async fn cache_dir(&self) -> Option<PathBuf> {
+        discover_cache_dir().await
     }
 
     async fn execute(&self, ctx: &RunCtx) -> ManagerResult {

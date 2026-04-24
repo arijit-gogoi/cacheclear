@@ -59,6 +59,10 @@ impl Manager for Pnpm {
         }
     }
 
+    async fn cache_dir(&self) -> Option<PathBuf> {
+        discover_store_path().await
+    }
+
     async fn execute(&self, ctx: &RunCtx) -> ManagerResult {
         if ctx.dry_run {
             return ManagerResult::Done {

@@ -15,9 +15,11 @@ mod runner;
 
 use anyhow::Result;
 use clap::Parser;
+use futures::future::join_all;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::fs_util::dir_size;
 use crate::manager::{Manager, ManagerResult, RunCtx};
 
 #[tokio::main(flavor = "multi_thread")]
@@ -31,9 +33,6 @@ async fn main() -> Result<()> {
         no_color: cli.no_color,
     };
 
-    // Phase-1 wiring: only `uv` is implemented end-to-end. The other six
-    // managers still return `SkippedMissing` from their stubs, which the
-    // runner treats correctly (we don't even call `execute` on them).
     let managers: Vec<Arc<dyn Manager>> = vec![
         Arc::new(managers::uv::Uv),
         Arc::new(managers::pip::Pip),
@@ -44,28 +43,45 @@ async fn main() -> Result<()> {
         Arc::new(managers::bun::Bun),
     ];
 
-    let results = runner::run_all(managers, ctx).await;
-
-    // Provisional textual output until `report` is wired up.
-    let mut any_failed = false;
-    for (name, result) in &results {
-        match result {
-            ManagerResult::Done { freed, took } => {
-                println!("  ✓ {name:<8} done       {freed:>10} bytes  ({:.1?})", took);
-            }
-            ManagerResult::SkippedMissing => {
-                println!("  ⊘ {name:<8} skipped    not installed");
-            }
-            ManagerResult::SkippedBusy { reason } => {
-                println!("  ⊘ {name:<8} skipped    busy: {reason}");
-            }
-            ManagerResult::Failed { error } => {
-                any_failed = true;
-                println!("  ✗ {name:<8} failed     {error}");
-            }
-        }
+    if ctx.dry_run {
+        // Build (name, detected, plan, would_freed) for the dry-run emitter.
+        // detect() and cache_dir() probes happen in parallel per manager.
+        let entries: Vec<(String, bool, crate::manager::Plan, Option<u64>)> =
+            join_all(managers.iter().cloned().map(|m| async move {
+                let name = m.name().to_string();
+                let detected = m.detect().await;
+                let plan = m.plan();
+                // Best-effort size estimate: prefer the plan's concrete paths
+                // (direct-deletion managers), fall back to cache_dir() probe
+                // (subprocess managers).
+                let would_free = if !detected {
+                    None
+                } else if !plan.paths.is_empty() {
+                    let mut total: u64 = 0;
+                    for p in &plan.paths {
+                        if let Ok(sz) = dir_size(p) {
+                            total = total.saturating_add(sz);
+                        }
+                    }
+                    Some(total)
+                } else if let Some(cd) = m.cache_dir().await {
+                    dir_size(&cd).ok()
+                } else {
+                    None
+                };
+                (name, detected, plan, would_free)
+            }))
+            .await;
+        report::emit_dry_run_plan(&entries);
+        return Ok(());
     }
 
+    let results = runner::run_all(managers, ctx).await;
+    report::emit_run_report(&results);
+
+    let any_failed = results
+        .iter()
+        .any(|(_, r)| matches!(r, ManagerResult::Failed { .. }));
     if any_failed {
         std::process::exit(1);
     }

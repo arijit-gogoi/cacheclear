@@ -7,10 +7,32 @@
 
 use crate::manager::{Manager, ManagerResult, Plan, RunCtx};
 use async_trait::async_trait;
+use std::path::PathBuf;
 use std::time::Instant;
 use tokio::process::Command;
 
 pub struct Npm;
+
+/// Discover npm's cache dir via `npm config get cache`.
+async fn discover_cache_dir() -> Option<PathBuf> {
+    let bin = which::which("npm").ok()?;
+    let output = Command::new(&bin)
+        .args(["config", "get", "cache"])
+        .kill_on_drop(true)
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8(output.stdout).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "undefined" {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
+}
 
 #[async_trait]
 impl Manager for Npm {
@@ -27,6 +49,10 @@ impl Manager for Npm {
             description: "run `npm cache clean --force`".into(),
             paths: vec![],
         }
+    }
+
+    async fn cache_dir(&self) -> Option<PathBuf> {
+        discover_cache_dir().await
     }
 
     async fn execute(&self, ctx: &RunCtx) -> ManagerResult {

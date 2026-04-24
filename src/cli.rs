@@ -42,17 +42,3 @@ pub struct Cli {
     pub no_color: bool,
 }
 
-impl Cli {
-    /// Placeholder so the scaffold compiles before we wire the real entry point.
-    pub fn placeholder() -> Self {
-        Self {
-            only: None,
-            skip: None,
-            dry_run: false,
-            json: false,
-            verbose: false,
-            timeout: 120,
-            no_color: false,
-        }
-    }
-}

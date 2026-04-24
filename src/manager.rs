@@ -53,4 +53,18 @@ pub trait Manager: Send + Sync {
 
     /// Actually clear. Must respect `ctx.dry_run` (return `Done { freed: 0 }` if true).
     async fn execute(&self, ctx: &RunCtx) -> ManagerResult;
+
+    /// Optional: the cache directory the runner can probe with `dir_size`
+    /// before/after `execute()` to compute `freed_bytes` — used for
+    /// subprocess managers that don't expose machine-readable freed-bytes
+    /// (npm, pnpm, bun, uv, pip).
+    ///
+    /// Returns `None` for managers that compute `freed` themselves
+    /// (cargo, pipx — both direct-deletion).
+    ///
+    /// Async because some managers (pnpm) discover their cache dir by
+    /// shelling out to the manager itself.
+    async fn cache_dir(&self) -> Option<std::path::PathBuf> {
+        None
+    }
 }
