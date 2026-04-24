@@ -1,0 +1,25 @@
+# Rust
+/target/
+Cargo.lock.bak
+**/*.rs.bk
+
+# IDE — JetBrains (RustRover/IntelliJ)
+# Keep .idea/cacheclear.iml and .idea/modules.xml (shareable project structure)
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/shelf/
+.idea/dictionaries/
+.idea/sonarlint/
+
+# Claude Code — per-user, not for the team
+.claude/settings.local.json
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Editor backups / swap
+*.swp
+*~

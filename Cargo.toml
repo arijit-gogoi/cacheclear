@@ -1,0 +1,56 @@
+[package]
+name = "cacheclear"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Clear download/build caches of common package managers in parallel — never uninstalls anything."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourname/cacheclear"
+readme = "README.md"
+keywords = ["cache", "cleanup", "cargo", "npm", "disk-space"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Async runtime + concurrent subprocesses
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "fs", "io-util"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Filesystem
+walkdir = "2"
+fs2 = "0.4"           # cross-platform non-blocking flock for cargo / pnpm busy detection
+dirs = "5"            # cross-platform $HOME, %LOCALAPPDATA%, $CARGO_HOME, etc.
+which = "6"           # PATH lookup for manager binaries
+
+# Progress UI
+indicatif = "0.17"
+console = "0.15"      # color/no-color terminal handling
+
+# Output / JSON
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Errors + logging
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Human-readable byte sizes
+byte-unit = "5"
+
+[target.'cfg(windows)'.dependencies]
+dunce = "1"           # strip \\?\ prefix from paths shown to users (display only)
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
