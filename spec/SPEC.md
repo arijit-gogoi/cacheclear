@@ -60,7 +60,7 @@ This is the contract. For each supported manager, here is the exact action taken
 | **cargo** | `cargo --version` | Delete contents of these dirs under `$CARGO_HOME` (default `~/.cargo`): `registry/cache/*`, `registry/src/*`, `git/db/*`, `git/checkouts/*`. **Do NOT touch `bin/` or `registry/index/`.** | Cargo has no cache command. These four dirs are documented as "safe to delete, will be re-downloaded." |
 | **npm** | `npm --version` | `npm cache clean --force` | `--force` is required by npm; command only removes cache, not installed packages. |
 | **pnpm** | `pnpm --version` | `pnpm store prune` | Removes unreferenced packages from the content-addressable store. Do NOT delete the store dir wholesale — that would break every pnpm project symlinking into it. |
-| **bun** | `bun --version` | `bun pm cache rm` | Clears `~/.bun/install/cache`. Does not uninstall anything. |
+| **bun** | `bun --version` | `bun pm --global cache rm` | Clears `~/.bun/install/cache`. Does not uninstall anything. The `--global` flag is required: `bun pm cache rm` without it operates on the *local* project's `node_modules` cache (errors when no project context exists), which is not what we want. |
 
 For each manager, if detection fails → mark as **Skipped** and continue. Never error out the whole run because one manager is missing.
 
