@@ -3,17 +3,12 @@
 Cargo.lock.bak
 **/*.rs.bk
 
-# IDE — JetBrains (RustRover/IntelliJ)
-# Keep .idea/cacheclear.iml and .idea/modules.xml (shareable project structure)
-.idea/workspace.xml
-.idea/tasks.xml
-.idea/usage.statistics.xml
-.idea/shelf/
-.idea/dictionaries/
-.idea/sonarlint/
+# IDE — JetBrains (RustRover/IntelliJ); per-user, not part of the project
+.idea/
 
-# Claude Code — per-user, not for the team
+# Claude Code / MCP — per-user, not part of the project
 .claude/settings.local.json
+.mcp.json
 
 # OS
 Thumbs.db
