@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arijit-gogoi/cacheclear/schema/output.schema.json",
+  "title": "cacheclear --json output (version 1)",
+  "oneOf": [
+    { "$ref": "#/$defs/run" },
+    { "$ref": "#/$defs/dry_run" }
+  ],
+  "$defs": {
+    "manager": {
+      "enum": ["uv", "pip", "pipx", "cargo", "npm", "pnpm", "bun"]
+    },
+    "count": { "type": "integer", "minimum": 0 },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "mode", "results", "summary"],
+      "properties": {
+        "version": { "const": 1 },
+        "mode": { "const": "run" },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["manager", "outcome", "freed_bytes", "took_ms", "note"],
+            "properties": {
+              "manager": { "$ref": "#/$defs/manager" },
+              "outcome": { "enum": ["done", "skipped", "failed"] },
+              "freed_bytes": { "$ref": "#/$defs/count" },
+              "took_ms": { "$ref": "#/$defs/count" },
+              "note": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["total_freed_bytes", "total_took_ms", "ran", "skipped", "failed", "total"],
+          "properties": {
+            "total_freed_bytes": { "$ref": "#/$defs/count" },
+            "total_took_ms": { "$ref": "#/$defs/count" },
+            "ran": { "$ref": "#/$defs/count" },
+            "skipped": { "$ref": "#/$defs/count" },
+            "failed": { "$ref": "#/$defs/count" },
+            "total": { "$ref": "#/$defs/count" }
+          }
+        }
+      }
+    },
+    "dry_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "mode", "plan", "total_would_free_bytes", "any_size_unknown"],
+      "properties": {
+        "version": { "const": 1 },
+        "mode": { "const": "dry_run" },
+        "plan": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["manager", "detected", "description", "paths", "would_free_bytes"],
+            "properties": {
+              "manager": { "$ref": "#/$defs/manager" },
+              "detected": { "type": "boolean" },
+              "description": { "type": "string" },
+              "paths": { "type": "array", "items": { "type": "string" } },
+              "would_free_bytes": {
+                "oneOf": [{ "$ref": "#/$defs/count" }, { "type": "null" }]
+              }
+            }
+          }
+        },
+        "total_would_free_bytes": { "$ref": "#/$defs/count" },
+        "any_size_unknown": { "type": "boolean" }
+      }
+    }
+  }
+}

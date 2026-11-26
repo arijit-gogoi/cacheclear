@@ -361,3 +361,29 @@ fn long_paths_are_cleared() {
     assert_installed_untouched(&installed_before);
     assert_all_gone(&fake.cargo_cache);
 }
+
+/// Phase 2 exit criterion: `--json` output validates against
+/// `schema/output.schema.json`, in both run and dry-run modes.
+#[test]
+fn json_output_matches_schema() {
+    let schema: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("schema/output.schema.json"))
+            .expect("reading schema"),
+    )
+    .expect("schema is JSON");
+    let validator = jsonschema::validator_for(&schema).expect("schema compiles");
+
+    let fake = FakeHome::new().expect("setting up fake $HOME");
+    for (args, mode) in [
+        (&["--json", "--dry-run"][..], "dry_run"),
+        (&["--json"][..], "run"),
+    ] {
+        let output = fake.run(args);
+        assert!(output.status.success(), "args {args:?}");
+        let doc: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("stdout is one JSON document");
+        let errors: Vec<String> = validator.iter_errors(&doc).map(|e| e.to_string()).collect();
+        assert!(errors.is_empty(), "args {args:?}: schema errors: {errors:#?}");
+        assert_eq!(doc["mode"], mode);
+    }
+}
