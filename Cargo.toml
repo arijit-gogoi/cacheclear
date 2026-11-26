@@ -9,6 +9,7 @@ repository = "https://github.com/arijit-gogoi/cacheclear"
 readme = "README.md"
 keywords = ["cache", "cleanup", "cargo", "npm", "disk-space"]
 categories = ["command-line-utilities", "development-tools"]
+exclude = [".idea/", ".github/", ".claude/", ".mcp.json"]
 
 [dependencies]
 # CLI
