@@ -7,19 +7,49 @@
 //!            [-h|--help] [-V|--version]
 //! ```
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+
+/// Manager names accepted by `--only` / `--skip`.
+///
+/// Must match `Manager::name()` of each manager. Clap rejects any other
+/// name with a usage error (exit 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ManagerName {
+    Uv,
+    Pip,
+    Pipx,
+    Cargo,
+    Npm,
+    Pnpm,
+    Bun,
+}
+
+impl ManagerName {
+    /// The name as `Manager::name()` reports it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Uv => "uv",
+            Self::Pip => "pip",
+            Self::Pipx => "pipx",
+            Self::Cargo => "cargo",
+            Self::Npm => "npm",
+            Self::Pnpm => "pnpm",
+            Self::Bun => "bun",
+        }
+    }
+}
 
 /// Clear download/build caches of common package managers in parallel.
 #[derive(Debug, Parser)]
 #[command(name = "cacheclear", version, about, long_about = None)]
 pub struct Cli {
     /// Comma-separated managers to include (default: all detected).
-    #[arg(long, value_name = "LIST")]
-    pub only: Option<String>,
+    #[arg(long, value_name = "LIST", value_delimiter = ',')]
+    pub only: Option<Vec<ManagerName>>,
 
-    /// Comma-separated managers to exclude.
-    #[arg(long, value_name = "LIST")]
-    pub skip: Option<String>,
+    /// Comma-separated managers to exclude. Applied after `--only`.
+    #[arg(long, value_name = "LIST", value_delimiter = ',')]
+    pub skip: Vec<ManagerName>,
 
     /// Print what would be done; touch nothing.
     #[arg(long)]

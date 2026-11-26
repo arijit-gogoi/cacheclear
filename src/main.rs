@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
         no_color: cli.no_color,
     };
 
-    let managers: Vec<Arc<dyn Manager>> = vec![
+    let all: Vec<Arc<dyn Manager>> = vec![
         Arc::new(managers::uv::Uv),
         Arc::new(managers::pip::Pip),
         Arc::new(managers::pipx::Pipx),
@@ -42,6 +42,9 @@ async fn main() -> Result<()> {
         Arc::new(managers::pnpm::Pnpm),
         Arc::new(managers::bun::Bun),
     ];
+    // Filter once, before the dry-run / real-run split, so both paths see
+    // the same set. Filtered-out managers are dropped from the report.
+    let managers = select_managers(all, cli.only.as_deref(), &cli.skip);
 
     if ctx.dry_run {
         // Build (name, detected, plan, would_freed) for the dry-run emitter.
@@ -94,4 +97,74 @@ async fn main() -> Result<()> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+/// Apply `--only` (keep listed managers), then `--skip` (drop listed ones).
+/// Order of the returned managers follows the built-in order.
+fn select_managers(
+    all: Vec<Arc<dyn Manager>>,
+    only: Option<&[cli::ManagerName]>,
+    skip: &[cli::ManagerName],
+) -> Vec<Arc<dyn Manager>> {
+    let listed = |list: &[cli::ManagerName], name: &str| list.iter().any(|n| n.as_str() == name);
+    all.into_iter()
+        .filter(|m| only.is_none_or(|o| listed(o, m.name())))
+        .filter(|m| !listed(skip, m.name()))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cli::ManagerName;
+    use clap::ValueEnum;
+
+    fn all() -> Vec<Arc<dyn Manager>> {
+        vec![
+            Arc::new(managers::uv::Uv),
+            Arc::new(managers::pip::Pip),
+            Arc::new(managers::pipx::Pipx),
+            Arc::new(managers::cargo::Cargo),
+            Arc::new(managers::npm::Npm),
+            Arc::new(managers::pnpm::Pnpm),
+            Arc::new(managers::bun::Bun),
+        ]
+    }
+
+    fn names(ms: &[Arc<dyn Manager>]) -> Vec<&'static str> {
+        ms.iter().map(|m| m.name()).collect()
+    }
+
+    #[test]
+    fn manager_names_match_cli_enum() {
+        let mut cli_names: Vec<&str> = ManagerName::value_variants()
+            .iter()
+            .map(|n| n.as_str())
+            .collect();
+        let mut mgr_names = names(&all());
+        cli_names.sort_unstable();
+        mgr_names.sort_unstable();
+        assert_eq!(cli_names, mgr_names);
+        for n in ManagerName::value_variants() {
+            assert_eq!(ManagerName::from_str(n.as_str(), false), Ok(*n));
+        }
+    }
+
+    #[test]
+    fn select_only_then_skip() {
+        use ManagerName::*;
+        assert_eq!(names(&select_managers(all(), None, &[])).len(), 7);
+        assert_eq!(
+            names(&select_managers(all(), Some(&[Npm, Cargo]), &[])),
+            ["cargo", "npm"]
+        );
+        assert_eq!(
+            names(&select_managers(all(), None, &[Npm, Pnpm, Bun])),
+            ["uv", "pip", "pipx", "cargo"]
+        );
+        assert_eq!(
+            names(&select_managers(all(), Some(&[Npm, Cargo]), &[Npm])),
+            ["cargo"]
+        );
+    }
 }
