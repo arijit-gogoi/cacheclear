@@ -1,0 +1,6 @@
+# Pin the toolchain so CI and release runners install Rust 1.100 instead of
+# using an older preinstalled stable (the x86_64 macOS runner had 1.98).
+# Bump together with `rust-version` in Cargo.toml.
+[toolchain]
+channel = "1.100"
+components = ["clippy", "rustfmt"]
