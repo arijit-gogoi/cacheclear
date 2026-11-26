@@ -18,25 +18,55 @@
 //! This is the safety net behind the no-uninstall invariant. If anyone ever
 //! breaks `safe_rm_contents`, breaks `is_safe_root`, or accidentally points
 //! a manager at the wrong dir, this test fails.
+//!
+//! Only cargo and pipx are exercised: with no real binaries on PATH, they are
+//! the only managers detectable (via cache-dir existence).
+//!
+//! Other tests in this file cover `--only` / `--skip`, `--dry-run` touching
+//! nothing, a busy cargo lock, and Windows long paths.
 
 use assert_cmd::Command;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Output;
 use tempfile::TempDir;
 
 /// All the file paths we lay down in the fake `$HOME`.
-///
-/// `cache_*` paths are expected to be EMPTIED (file removed).
-/// `installed_*` paths are FORBIDDEN to touch (must remain byte-identical).
 struct FakeHome {
     root: TempDir,
-    /// Paths that the tool is allowed to delete (and that we expect to be
-    /// gone after the run).
-    cache_paths: Vec<PathBuf>,
+    /// cargo cache files: expected to be deleted when cargo runs.
+    cargo_cache: Vec<PathBuf>,
+    /// pipx cache files: expected to be deleted when pipx runs.
+    pipx_cache: Vec<PathBuf>,
     /// Paths that the tool MUST NOT delete or modify. Our invariant.
     installed_paths: Vec<PathBuf>,
+}
+
+/// pipx layout for the current platform: (cache files, installed files),
+/// relative to `$HOME`. Mirrors `managers::pipx::default_cache_dirs`.
+fn pipx_layout() -> (Vec<&'static str>, Vec<&'static str>) {
+    // Pre-1.3 home, used on every platform.
+    let mut cache = vec![".local/pipx/.cache/legacyhash/bin/python"];
+    let mut installed = vec![
+        ".local/pipx/venvs/black/bin/black",
+        ".local/pipx/venvs/black/lib/python3.11/site-packages/black/__init__.py",
+    ];
+    if cfg!(windows) {
+        // pipx >= 1.3 venv cache (platformdirs) + Windows `~\pipx` home.
+        cache.push("AppData/Local/pipx/pipx/Cache/winhash/Scripts/python.exe");
+        cache.push("pipx/.cache/oldwinhash/Scripts/python.exe");
+        installed.push("pipx/venvs/ruff/Scripts/ruff.exe");
+        installed.push("AppData/Local/pipx/pipx/venvs/black/Scripts/black.exe");
+    } else if cfg!(target_os = "macos") {
+        cache.push("Library/Caches/pipx/machash/bin/python");
+        installed.push(".local/share/pipx/venvs/ruff/bin/ruff");
+    } else {
+        cache.push(".cache/pipx/linhash/bin/python");
+        installed.push(".local/share/pipx/venvs/ruff/bin/ruff");
+    }
+    (cache, installed)
 }
 
 impl FakeHome {
@@ -44,13 +74,12 @@ impl FakeHome {
         let root = tempfile::tempdir()?;
         let home = root.path();
 
-        let mut cache_paths = Vec::new();
+        let mut cargo_cache = Vec::new();
+        let mut pipx_cache = Vec::new();
         let mut installed_paths = Vec::new();
 
         // ----- cargo: cache dirs (delete-allowed) + bin & registry/index (FORBIDDEN) -----
-        // Layout under $HOME/.cargo:
         let cargo = home.join(".cargo");
-        // Allowed-to-delete:
         for sub in [
             "registry/cache/index.crates.io-abc/foo-1.0.0.crate",
             "registry/src/index.crates.io-abc/foo-1.0.0/src/lib.rs",
@@ -59,9 +88,8 @@ impl FakeHome {
         ] {
             let p = cargo.join(sub);
             write_with_parents(&p, b"cargo cache content\n")?;
-            cache_paths.push(p);
+            cargo_cache.push(p);
         }
-        // FORBIDDEN to delete:
         for sub in [
             "bin/cargo.exe",
             "bin/rustc.exe",
@@ -73,43 +101,20 @@ impl FakeHome {
             installed_paths.push(p);
         }
 
-        // ----- pipx: .cache/ (delete-allowed) + venvs/ (FORBIDDEN) -----
-        // Layout under $HOME/.local/pipx (Linux/macOS path):
-        let pipx_lin = home.join(".local").join("pipx");
-        for sub in [
-            ".cache/somehash-3.11/bin/python",
-            ".cache/somehash-3.11/lib/python3.11/site.py",
-        ] {
-            let p = pipx_lin.join(sub);
+        // ----- pipx: cache dirs (delete-allowed) + venvs/ (FORBIDDEN) -----
+        let (pipx_c, pipx_i) = pipx_layout();
+        for sub in pipx_c {
+            let p = home.join(sub);
             write_with_parents(&p, b"pipx ephemeral venv (cache)\n")?;
-            cache_paths.push(p);
+            pipx_cache.push(p);
         }
-        for sub in [
-            "venvs/black/bin/black",
-            "venvs/black/lib/python3.11/site-packages/black/__init__.py",
-            "venvs/ruff/bin/ruff.exe",
-        ] {
-            let p = pipx_lin.join(sub);
+        for sub in pipx_i {
+            let p = home.join(sub);
             write_with_parents(&p, b"INSTALLED TOOL via pipx\n")?;
-            installed_paths.push(p);
-        }
-        // Same for the Windows-default location: %LOCALAPPDATA%\pipx\pipx
-        // (we'll point LOCALAPPDATA at $HOME\AppData\Local in the env block).
-        let pipx_win = home.join("AppData").join("Local").join("pipx").join("pipx");
-        for sub in [".cache/winhash-3.11/bin/python.exe"] {
-            let p = pipx_win.join(sub);
-            write_with_parents(&p, b"pipx ephemeral venv (cache, win)\n")?;
-            cache_paths.push(p);
-        }
-        for sub in ["venvs/black/Scripts/black.exe"] {
-            let p = pipx_win.join(sub);
-            write_with_parents(&p, b"INSTALLED TOOL via pipx (win)\n")?;
             installed_paths.push(p);
         }
 
         // ----- random unrelated content (FORBIDDEN to touch) -----
-        // Just a sanity check: a file completely unrelated to any cache must
-        // also remain untouched.
         for sub in [
             "Documents/secret.txt",
             ".bashrc",
@@ -122,13 +127,55 @@ impl FakeHome {
 
         Ok(Self {
             root,
-            cache_paths,
+            cargo_cache,
+            pipx_cache,
             installed_paths,
         })
     }
 
     fn home(&self) -> &Path {
         self.root.path()
+    }
+
+    /// Run `cacheclear` with `args`, quarantined inside the fake `$HOME`:
+    /// - HOME / USERPROFILE → fake home (so `dirs::home_dir()` resolves inside)
+    /// - LOCALAPPDATA → fake AppData\Local (pipx Windows default)
+    /// - CARGO_HOME → fake `$HOME/.cargo`
+    /// - PIPX_HOME / XDG_CACHE_HOME unset (env cleared), so defaults are used
+    /// - PATH → one empty dir, so no real package manager is detected
+    fn run(&self, args: &[&str]) -> Output {
+        let home = self.home();
+        let fake_path = home.join("__no_real_binaries__");
+        fs::create_dir_all(&fake_path).unwrap();
+
+        let mut cmd = Command::cargo_bin("cacheclear").expect("locating cacheclear binary");
+        cmd.env_clear()
+            .env("HOME", home)
+            .env("USERPROFILE", home)
+            .env("LOCALAPPDATA", home.join("AppData").join("Local"))
+            .env("CARGO_HOME", home.join(".cargo"))
+            .env("PATH", &fake_path)
+            .args(args);
+        // SystemRoot is required on Windows for many syscalls; preserve it.
+        if let Ok(sr) = std::env::var("SystemRoot") {
+            cmd.env("SystemRoot", sr);
+        }
+
+        let output = cmd.output().expect("running cacheclear");
+        eprintln!(
+            "--- cacheclear {args:?} (exit {:?}) ---\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        output
+    }
+
+    fn snapshot_installed(&self) -> BTreeMap<PathBuf, Vec<u8>> {
+        self.installed_paths
+            .iter()
+            .map(|p| (p.clone(), fs::read(p).expect("reading installed path")))
+            .collect()
     }
 }
 
@@ -140,62 +187,11 @@ fn write_with_parents(path: &Path, bytes: &[u8]) -> io::Result<()> {
     fs::write(path, bytes)
 }
 
-#[test]
-fn no_uninstall_invariant_holds_against_fake_home() {
-    let fake = FakeHome::new().expect("setting up fake $HOME");
-
-    // Snapshot the FORBIDDEN paths' contents BEFORE running.
-    let installed_before: BTreeMap<PathBuf, Vec<u8>> = fake
-        .installed_paths
-        .iter()
-        .map(|p| (p.clone(), fs::read(p).expect("reading installed path")))
-        .collect();
-
-    // Build env that quarantines the run inside the fake $HOME:
-    // - HOME / USERPROFILE → fake home (so dirs::home_dir() resolves inside)
-    // - LOCALAPPDATA → fake AppData\Local (so pipx Windows default resolves inside)
-    // - CARGO_HOME → fake $HOME/.cargo (belt-and-suspenders against env leakage)
-    // - PIPX_HOME unset (we want the platform default to be used so we exercise
-    //   pipx_cache_dir's defaulting logic)
-    // - PATH cleared to a single non-existent dir, so detect()'s which::which
-    //   calls all return false. The managers should fall back to "cache dir
-    //   exists?" detection where applicable (cargo, pipx).
-    let home = fake.home();
-    let fake_path = home.join("__no_real_binaries__");
-    fs::create_dir_all(&fake_path).unwrap();
-
-    let mut cmd = Command::cargo_bin("cacheclear").expect("locating cacheclear binary");
-    cmd.env_clear()
-        .env("HOME", home)
-        .env("USERPROFILE", home)
-        .env("LOCALAPPDATA", home.join("AppData").join("Local"))
-        .env("CARGO_HOME", home.join(".cargo"))
-        .env("PATH", &fake_path);
-
-    // SystemRoot is required on Windows for many syscalls; preserve it.
-    if let Ok(sr) = std::env::var("SystemRoot") {
-        cmd.env("SystemRoot", sr);
-    }
-
-    let output = cmd.output().expect("running cacheclear");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    eprintln!("--- cacheclear stdout ---\n{stdout}");
-    eprintln!("--- cacheclear stderr ---\n{stderr}");
-    // Exit status: should be 0 (everything either ran or was skipped). If
-    // any manager Failed, that's a test failure — print so we can see why.
-    assert!(
-        output.status.success(),
-        "cacheclear exited with non-zero status. stdout:\n{stdout}\nstderr:\n{stderr}"
-    );
-
-    // ---- INVARIANT 1: every installed path remains byte-identical ----
-    for (path, before_bytes) in &installed_before {
+/// Every installed path must still exist with identical content.
+fn assert_installed_untouched(before: &BTreeMap<PathBuf, Vec<u8>>) {
+    for (path, before_bytes) in before {
         let after_bytes = fs::read(path).unwrap_or_else(|e| {
-            panic!(
-                "FORBIDDEN path was deleted: {} (err: {e})",
-                path.display()
-            )
+            panic!("FORBIDDEN path was deleted: {} (err: {e})", path.display())
         });
         assert_eq!(
             *before_bytes,
@@ -204,72 +200,164 @@ fn no_uninstall_invariant_holds_against_fake_home() {
             path.display()
         );
     }
+}
 
-    // ---- INVARIANT 2: cache files were cleared ----
-    //
-    // Only assert deletion for cache files whose owning manager is BOTH
-    // (a) detectable in this sandbox (no real binaries on PATH, so detection
-    //     must succeed via cache-dir existence — true for cargo and pipx, false
-    //     for the five subprocess managers), AND
-    // (b) using the per-platform default cache path (e.g. on Windows, pipx
-    //     uses %LOCALAPPDATA%\pipx\pipx\.cache, NOT ~/.local/pipx/.cache).
-    //
-    // We populated BOTH platform layouts so the test is portable; on each
-    // platform, only the in-platform layout's cache files are expected to
-    // disappear. The cross-platform files are documentation, not assertions.
-    let mut deletion_assertions = 0_usize;
-    for cache_path in &fake.cache_paths {
-        if !is_targeted_by_current_platform(cache_path, fake.home()) {
-            continue;
-        }
-        deletion_assertions += 1;
-        assert!(
-            !cache_path.exists(),
-            "cache file should have been deleted but survived: {}",
-            cache_path.display()
-        );
+fn assert_all_gone(paths: &[PathBuf]) {
+    for p in paths {
+        assert!(!p.exists(), "cache file should have been deleted: {}", p.display());
     }
-    // Sanity: at least cargo's 4 files should always be in the assertion set
-    // since cargo's layout is identical across platforms.
-    assert!(
-        deletion_assertions >= 4,
-        "expected at least 4 cache deletion assertions (cargo's 4 dirs), got {deletion_assertions}"
+}
+
+fn assert_all_present(paths: &[PathBuf]) {
+    for p in paths {
+        assert!(p.exists(), "cache file should NOT have been deleted: {}", p.display());
+    }
+}
+
+/// Every file under `root` with its content. Used to prove nothing changed.
+fn snapshot_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    let mut out = BTreeMap::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).expect("reading dir") {
+            let entry = entry.expect("dir entry");
+            let path = entry.path();
+            let ft = entry.file_type().expect("file type");
+            if ft.is_dir() {
+                // Record directories too, so a removed empty dir shows up.
+                out.insert(path.clone(), Vec::new());
+                stack.push(path);
+            } else {
+                out.insert(path.clone(), fs::read(&path).expect("reading file"));
+            }
+        }
+    }
+    out
+}
+
+fn stdout(o: &Output) -> String {
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+#[test]
+fn no_uninstall_invariant_holds_against_fake_home() {
+    let fake = FakeHome::new().expect("setting up fake $HOME");
+    let installed_before = fake.snapshot_installed();
+
+    let output = fake.run(&[]);
+    assert!(output.status.success(), "cacheclear exited non-zero");
+
+    assert_installed_untouched(&installed_before);
+    assert_all_gone(&fake.cargo_cache);
+    assert_all_gone(&fake.pipx_cache);
+}
+
+#[test]
+fn only_pipx_leaves_cargo_cache_alone() {
+    let fake = FakeHome::new().expect("setting up fake $HOME");
+    let installed_before = fake.snapshot_installed();
+
+    let output = fake.run(&["--only", "pipx"]);
+    assert!(output.status.success());
+    let out = stdout(&output);
+    assert!(out.contains("pipx"), "pipx missing from report");
+    assert!(!out.contains("cargo"), "filtered-out cargo appears in report");
+
+    assert_installed_untouched(&installed_before);
+    assert_all_present(&fake.cargo_cache);
+    assert_all_gone(&fake.pipx_cache);
+}
+
+#[test]
+fn skip_cargo_leaves_cargo_cache_alone() {
+    let fake = FakeHome::new().expect("setting up fake $HOME");
+    let installed_before = fake.snapshot_installed();
+
+    let output = fake.run(&["--skip", "cargo,npm"]);
+    assert!(output.status.success());
+    assert!(!stdout(&output).contains("cargo"));
+
+    assert_installed_untouched(&installed_before);
+    assert_all_present(&fake.cargo_cache);
+    assert_all_gone(&fake.pipx_cache);
+}
+
+#[test]
+fn unknown_manager_name_is_usage_error() {
+    let fake = FakeHome::new().expect("setting up fake $HOME");
+    // The PATH dir is created by `run`; create it first so it is in both snapshots.
+    fs::create_dir_all(fake.home().join("__no_real_binaries__")).unwrap();
+    let before = snapshot_tree(fake.home());
+
+    for args in [&["--only", "cargo,nope"][..], &["--skip", "nope"][..]] {
+        let output = fake.run(args);
+        assert_eq!(output.status.code(), Some(2), "args {args:?}");
+    }
+    assert_eq!(before, snapshot_tree(fake.home()), "usage error modified files");
+}
+
+#[test]
+fn dry_run_touches_nothing() {
+    let fake = FakeHome::new().expect("setting up fake $HOME");
+    // The PATH dir is created by `run`; create it first so it is in both snapshots.
+    fs::create_dir_all(fake.home().join("__no_real_binaries__")).unwrap();
+    let before = snapshot_tree(fake.home());
+
+    for args in [&["--dry-run"][..], &["--dry-run", "--json"][..]] {
+        let output = fake.run(args);
+        assert!(output.status.success(), "args {args:?}");
+    }
+
+    assert_eq!(before, snapshot_tree(fake.home()), "--dry-run modified files");
+}
+
+#[test]
+fn busy_cargo_lock_is_skipped_not_failed() {
+    use fs2::FileExt;
+
+    let fake = FakeHome::new().expect("setting up fake $HOME");
+    let installed_before = fake.snapshot_installed();
+
+    // Hold cargo's package-cache lock, as a running `cargo build` would.
+    let lock_path = fake.home().join(".cargo").join(".package-cache");
+    let lock = fs::File::create(&lock_path).unwrap();
+    lock.lock_exclusive().unwrap();
+
+    let output = fake.run(&["--only", "cargo"]);
+    let out = stdout(&output);
+    assert!(output.status.success(), "busy cargo must exit 0");
+    assert!(out.contains("busy"), "expected a busy skip, got:\n{out}");
+
+    lock.unlock().unwrap();
+    assert_installed_untouched(&installed_before);
+    assert_all_present(&fake.cargo_cache);
+}
+
+#[test]
+fn long_paths_are_cleared() {
+    let fake = FakeHome::new().expect("setting up fake $HOME");
+    let installed_before = fake.snapshot_installed();
+
+    // Build a path well past Windows MAX_PATH (260) under registry/src.
+    // std::fs handles long absolute paths itself, so creating it works.
+    let mut deep = fake.home().join(".cargo").join("registry").join("src");
+    while deep.as_os_str().len() < 320 {
+        deep.push("a-fairly-long-directory-name-0123456789");
+    }
+    let deep_file = deep.join("lib.rs");
+    write_with_parents(&deep_file, b"deep cache file\n").unwrap();
+    assert!(deep_file.as_os_str().len() > 300);
+
+    let output = fake.run(&["--only", "cargo"]);
+    assert!(output.status.success());
+
+    assert!(!deep_file.exists(), "long-path cache file survived");
+    let src = fake.home().join(".cargo").join("registry").join("src");
+    assert_eq!(
+        fs::read_dir(&src).unwrap().count(),
+        0,
+        "registry/src should be empty"
     );
-
-    // ---- INVARIANT 3: no NEW files appeared anywhere outside the home tempdir ----
-    // (We can't easily assert this on the whole filesystem, but we DO assert
-    // that the install paths still exist and have correct content, which
-    // covers the most likely failure mode.)
-
-    // The TempDir auto-cleans on drop; keep `fake` alive until here.
-    drop(fake);
+    assert_installed_untouched(&installed_before);
+    assert_all_gone(&fake.cargo_cache);
 }
-
-/// True if this cache file is owned by a direct-deletion manager AND lives
-/// at the path that THIS platform's manager impl actually targets.
-fn is_targeted_by_current_platform(path: &Path, home: &Path) -> bool {
-    let rel = path.strip_prefix(home).unwrap_or(path);
-    let s = rel.to_string_lossy().replace('\\', "/");
-
-    // cargo: layout is the same on every platform — always asserted.
-    if s.starts_with(".cargo/") {
-        return true;
-    }
-
-    // pipx: per-platform default split.
-    #[cfg(windows)]
-    {
-        if s.starts_with("AppData/Local/pipx/") {
-            return true;
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        if s.starts_with(".local/pipx/") {
-            return true;
-        }
-    }
-
-    false
-}
-

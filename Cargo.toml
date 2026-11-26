@@ -49,6 +49,7 @@ dunce = "1"           # strip \\?\ prefix from paths shown to users (display onl
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
+fs2 = "0.4"            # hold a cargo lock in the busy-skip test
 
 [profile.release]
 lto = "thin"
