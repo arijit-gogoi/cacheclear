@@ -72,12 +72,20 @@ async fn main() -> Result<()> {
                 (name, detected, plan, would_free)
             }))
             .await;
-        report::emit_dry_run_plan(&entries);
+        if cli.json {
+            report::emit_json_dry_run(&entries);
+        } else {
+            report::emit_dry_run_plan(&entries);
+        }
         return Ok(());
     }
 
     let results = runner::run_all(managers, ctx).await;
-    report::emit_run_report(&results);
+    if cli.json {
+        report::emit_json_run(&results);
+    } else {
+        report::emit_run_report(&results);
+    }
 
     let any_failed = results
         .iter()

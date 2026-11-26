@@ -1,14 +1,44 @@
 //! Status board, summary, and JSON emitter.
 //!
-//! Two emitters live here:
-//! - `emit_run_report`: per-manager outcome icons + size-freed table + summary
-//!   line. Used after a real run.
-//! - `emit_dry_run_plan`: per-manager plan description + paths + size that
-//!   *would* be freed (where computable). Used when `--dry-run` is set.
+//! Four emitters live here:
+//! - `emit_run_report` / `emit_dry_run_plan`: human-readable, used by default.
+//! - `emit_json_run` / `emit_json_dry_run`: machine-readable, used by `--json`.
 //!
-//! Both produce the format shown in `spec/SPEC.md` §"CLI Surface" examples.
-//! `--json` (Phase 2) will swap these for a JSON emitter that consumes the
-//! same `ReportLine` data structure.
+//! All four consume the same `ReportLine` / `RunSummary` data shapes, so
+//! changing `Manager::execute` only requires touching `build_report` once.
+//!
+//! ## JSON schema (version 1)
+//!
+//! Run mode (`--json` without `--dry-run`):
+//! ```json
+//! {
+//!   "version": 1,
+//!   "mode": "run",
+//!   "results": [
+//!     { "manager": "cargo", "outcome": "done",
+//!       "freed_bytes": 491279791, "took_ms": 4200, "note": null }
+//!   ],
+//!   "summary": {
+//!     "total_freed_bytes": 491279791, "total_took_ms": 4200,
+//!     "ran": 1, "skipped": 0, "failed": 0, "total": 1
+//!   }
+//! }
+//! ```
+//!
+//! Dry-run mode (`--json --dry-run`):
+//! ```json
+//! {
+//!   "version": 1,
+//!   "mode": "dry_run",
+//!   "plan": [
+//!     { "manager": "cargo", "detected": true,
+//!       "description": "...", "paths": ["..."],
+//!       "would_free_bytes": 491279791 }
+//!   ],
+//!   "total_would_free_bytes": 491279791,
+//!   "any_size_unknown": false
+//! }
+//! ```
 
 use crate::manager::{ManagerResult, Plan};
 use serde::Serialize;
@@ -227,6 +257,113 @@ pub fn format_duration(d: Duration) -> String {
     let mins = (secs / 60.0).floor() as u64;
     let rem = (secs - (mins as f64) * 60.0).round() as u64;
     format!("{mins}m {rem}s")
+}
+
+// ========================================================================
+//                              JSON emitters
+// ========================================================================
+
+/// Top-level JSON document for a real run (`--json`).
+#[derive(Debug, Serialize)]
+struct JsonRunDoc {
+    version: u32,
+    mode: &'static str,
+    results: Vec<ReportLine>,
+    summary: JsonRunSummary,
+}
+
+#[derive(Debug, Serialize)]
+struct JsonRunSummary {
+    total_freed_bytes: u64,
+    total_took_ms: u128,
+    ran: usize,
+    skipped: usize,
+    failed: usize,
+    total: usize,
+}
+
+/// Top-level JSON document for `--json --dry-run`.
+#[derive(Debug, Serialize)]
+struct JsonDryRunDoc {
+    version: u32,
+    mode: &'static str,
+    plan: Vec<JsonPlanEntry>,
+    total_would_free_bytes: u64,
+    any_size_unknown: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct JsonPlanEntry {
+    manager: String,
+    detected: bool,
+    description: String,
+    paths: Vec<String>,
+    /// `null` when size is unknown (subprocess manager whose cache_dir()
+    /// probe failed) or when the manager wasn't detected.
+    would_free_bytes: Option<u64>,
+}
+
+/// Emit a JSON document on stdout describing the run results.
+pub fn emit_json_run(results: &[(String, ManagerResult)]) {
+    let summary = RunSummary::from_results(results);
+    let doc = JsonRunDoc {
+        version: 1,
+        mode: "run",
+        results: build_report(results),
+        summary: JsonRunSummary {
+            total_freed_bytes: summary.total_freed,
+            total_took_ms: summary.total_took.as_millis(),
+            ran: summary.ran,
+            skipped: summary.skipped,
+            failed: summary.failed,
+            total: results.len(),
+        },
+    };
+    // Pretty-print so humans can also read the output; piping through `jq`
+    // doesn't care, and one-off scripting consumers won't either.
+    match serde_json::to_string_pretty(&doc) {
+        Ok(s) => println!("{s}"),
+        Err(e) => eprintln!("(internal) failed to serialize JSON: {e}"),
+    }
+}
+
+/// Emit a JSON document on stdout describing the dry-run plan.
+pub fn emit_json_dry_run(entries: &[(String, bool, Plan, Option<u64>)]) {
+    let plan: Vec<JsonPlanEntry> = entries
+        .iter()
+        .map(|(name, detected, plan, would_free)| JsonPlanEntry {
+            manager: name.clone(),
+            detected: *detected,
+            description: plan.description.clone(),
+            paths: plan
+                .paths
+                .iter()
+                .map(|p| crate::fs_util::display_path(p).display().to_string())
+                .collect(),
+            would_free_bytes: if *detected { *would_free } else { None },
+        })
+        .collect();
+
+    let total_would_free_bytes: u64 = entries
+        .iter()
+        .filter_map(|(_, detected, _, w)| if *detected { *w } else { None })
+        .sum();
+    let any_size_unknown = entries
+        .iter()
+        .any(|(_, detected, _, w)| *detected && w.is_none());
+
+    let doc = JsonDryRunDoc {
+        version: 1,
+        mode: "dry_run",
+        plan,
+        total_would_free_bytes,
+        any_size_unknown,
+    };
+
+    match serde_json::to_string_pretty(&doc) {
+        Ok(s) => println!("{s}"),
+        Err(e) => eprintln!("(internal) failed to serialize JSON: {e}"),
+    }
 }
 
 #[cfg(test)]
