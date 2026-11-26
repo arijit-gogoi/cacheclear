@@ -30,13 +30,12 @@ pub enum ManagerResult {
     Failed { error: String },
 }
 
-/// Per-run shared context — verbosity, timeout, dry-run, color preference.
+/// Per-run shared context — verbosity, timeout, dry-run.
 #[derive(Debug, Clone)]
 pub struct RunCtx {
     pub verbose: bool,
     pub dry_run: bool,
     pub timeout: Duration,
-    pub no_color: bool,
 }
 
 /// The core trait. Every manager module implements this.

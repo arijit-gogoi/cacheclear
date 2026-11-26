@@ -67,7 +67,8 @@ pub struct Cli {
     #[arg(long, value_name = "SECS", default_value_t = 120)]
     pub timeout: u64,
 
-    /// Disable color output.
+    /// Disable color output. Output is currently uncolored, so this is a no-op;
+    /// it is accepted so scripts can pass it safely.
     #[arg(long)]
     pub no_color: bool,
 }

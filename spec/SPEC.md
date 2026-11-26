@@ -92,7 +92,7 @@ Two managers in the matrix can be actively writing to their cache from another s
 
 | Manager | Lock check |
 |---|---|
-| cargo | `fs2::FileExt::try_lock_exclusive` on `$CARGO_HOME/.package-cache` |
+| cargo | `std::fs::File::try_lock` on `$CARGO_HOME/.package-cache` |
 | pnpm | non-blocking lock on the store's lock file (`<store>/v3/.lock` or equivalent — discover via `pnpm store path`) |
 
 If the lock is held by another process → mark as **Skipped (busy)** and continue. Do **not** wait or retry — a user with an active build doesn't want a background cache clear silently delaying it. They can re-run once builds finish.
@@ -194,14 +194,14 @@ Total: 10.15 GB freed in 3.4s (6/7 ran, 1 skipped, 0 failed)
 
 | Concern | Choice | Why |
 |---|---|---|
-| Language | Rust (2024 edition, MSRV 1.85+) | User's preference; ideal for a small, fast, portable CLI. Edition 2024 was stabilized in Rust 1.85 (Feb 2025) and is the source of truth — bump in lockstep if `edition` is changed in `Cargo.toml`. |
+| Language | Rust (2024 edition, MSRV 1.100) | User's preference; ideal for a small, fast, portable CLI. Tracks the latest stable Rust (1.100, Nov 2026); `rust-version` in `Cargo.toml` is the source of truth. Uses std `File::try_lock` (1.89+) and the fixed `std::env::home_dir` (1.86+). |
 | Arg parsing | `clap` (derive feature) | De-facto standard, great UX out of the box |
 | Async runtime | `tokio` (multi-thread) | Native support for concurrent subprocesses + non-blocking I/O for streaming stdout/stderr |
 | Process spawn | `tokio::process::Command` | Async wait + per-process timeout via `tokio::time::timeout` |
 | Concurrency primitive | `futures::future::join_all` over one task per manager | Simplest model that fits ≤ ~15 concurrent tasks |
 | Progress UI | `indicatif` with `MultiProgress` | Standard in Rust CLI land; integrates cleanly with tokio |
 | Filesystem ops | `std::fs` + `walkdir` for size counting; `tokio::fs` where it helps | Size-before/size-after needs a quick walk |
-| File locking | `fs2` crate (`try_lock_exclusive`) | Cross-platform non-blocking flock for cargo / pnpm busy-detection |
+| File locking | std `File::try_lock` | Cross-platform non-blocking lock for cargo / pnpm busy-detection; reports Windows lock violations as `WouldBlock`, which fs2 did not |
 | Windows path display | `dunce` crate | Strip `\\?\` prefix from paths shown to user; internal ops keep the prefix |
 | Home/config dirs | `dirs` crate | Correct cross-platform resolution of `$HOME`, `$LOCALAPPDATA`, `$CARGO_HOME`, etc. |
 | Binary detection | `which` crate | Clean cross-platform PATH lookup |

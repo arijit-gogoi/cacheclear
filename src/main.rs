@@ -30,7 +30,6 @@ async fn main() -> Result<()> {
         verbose: cli.verbose,
         dry_run: cli.dry_run,
         timeout: Duration::from_secs(cli.timeout),
-        no_color: cli.no_color,
     };
 
     let all: Vec<Arc<dyn Manager>> = vec![

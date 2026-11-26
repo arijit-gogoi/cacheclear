@@ -6,8 +6,7 @@
 //!    (cargo's `registry/src/...`) don't trip MAX_PATH. Display strings strip
 //!    the prefix via `dunce`; **internal ops keep it**.
 
-use fs2::FileExt;
-use std::fs::{self, File};
+use std::fs::{self, File, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -36,19 +35,11 @@ pub fn prepare_root(p: &Path) -> io::Result<PathBuf> {
 /// paths through this, never through `dirs::home_dir()` directly.
 ///
 /// On Windows, `dirs::home_dir()` asks the shell for the profile folder and
-/// ignores `USERPROFILE`. We honour `USERPROFILE` first (as `std::env::home_dir`
-/// does since Rust 1.86), so an overridden or sandboxed home is respected.
-/// On Unix, `dirs::home_dir()` already honours `HOME`.
+/// ignores `USERPROFILE`. `std::env::home_dir` (fixed in Rust 1.86) honours
+/// `USERPROFILE` on Windows and `HOME` on Unix, so an overridden or sandboxed
+/// home is respected.
 pub fn home_dir() -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        if let Some(p) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
-            if p.is_absolute() {
-                return Some(p);
-            }
-        }
-    }
-    dirs::home_dir()
+    std::env::home_dir().filter(|p| p.is_absolute())
 }
 
 /// Refuse if the resolved path is at or above a system root.
@@ -114,11 +105,10 @@ pub fn dir_size(root: &Path) -> io::Result<u64> {
         .into_iter()
         .filter_map(Result::ok)
     {
-        if let Ok(meta) = entry.metadata() {
-            if meta.is_file() {
+        if let Ok(meta) = entry.metadata()
+            && meta.is_file() {
                 total = total.saturating_add(meta.len());
             }
-        }
     }
     Ok(total)
 }
@@ -269,23 +259,14 @@ pub fn try_lock_exclusive_nonblocking(path: &Path) -> io::Result<Option<File>> {
         return Ok(None);
     }
     let file = File::open(path)?;
-    match file.try_lock_exclusive() {
+    // std's `try_lock` reports contention as `TryLockError::WouldBlock` on
+    // every platform, including Windows' ERROR_LOCK_VIOLATION (os error 33),
+    // which a plain `io::ErrorKind` check would miss.
+    match file.try_lock() {
         Ok(()) => Ok(Some(file)),
-        Err(e) if is_lock_contended(&e) => Ok(None),
-        Err(e) => Err(e),
+        Err(TryLockError::WouldBlock) => Ok(None),
+        Err(TryLockError::Error(e)) => Err(e),
     }
-}
-
-/// True if `e` means "another process holds the lock".
-///
-/// Unix reports `EWOULDBLOCK`, which maps to `ErrorKind::WouldBlock`.
-/// Windows reports `ERROR_LOCK_VIOLATION` (os error 33), which Rust maps to
-/// `ErrorKind::Uncategorized`, so a kind check alone misses it. Compare the
-/// raw OS error against fs2's own contended-lock error instead.
-fn is_lock_contended(e: &io::Error) -> bool {
-    e.kind() == io::ErrorKind::WouldBlock
-        || (e.raw_os_error().is_some()
-            && e.raw_os_error() == fs2::lock_contended_error().raw_os_error())
 }
 
 #[cfg(test)]

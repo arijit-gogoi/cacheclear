@@ -16,11 +16,10 @@ pub struct Cargo;
 
 /// Resolve `$CARGO_HOME` honoring the env var; fall back to `~/.cargo`.
 fn cargo_home() -> Option<PathBuf> {
-    if let Ok(env) = std::env::var("CARGO_HOME") {
-        if !env.is_empty() {
+    if let Ok(env) = std::env::var("CARGO_HOME")
+        && !env.is_empty() {
             return Some(PathBuf::from(env));
         }
-    }
     crate::fs_util::home_dir().map(|h| h.join(".cargo"))
 }
 

@@ -313,15 +313,13 @@ fn dry_run_touches_nothing() {
 
 #[test]
 fn busy_cargo_lock_is_skipped_not_failed() {
-    use fs2::FileExt;
-
     let fake = FakeHome::new().expect("setting up fake $HOME");
     let installed_before = fake.snapshot_installed();
 
     // Hold cargo's package-cache lock, as a running `cargo build` would.
     let lock_path = fake.home().join(".cargo").join(".package-cache");
     let lock = fs::File::create(&lock_path).unwrap();
-    lock.lock_exclusive().unwrap();
+    lock.lock().unwrap();
 
     let output = fake.run(&["--only", "cargo"]);
     let out = stdout(&output);

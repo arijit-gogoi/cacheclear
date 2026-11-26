@@ -15,11 +15,10 @@ pub struct Bun;
 /// bun's global install cache lives at `~/.bun/install/cache` by convention.
 /// `BUN_INSTALL` overrides the `~/.bun` root if set.
 fn cache_dir_path() -> Option<PathBuf> {
-    if let Ok(env) = std::env::var("BUN_INSTALL") {
-        if !env.is_empty() {
+    if let Ok(env) = std::env::var("BUN_INSTALL")
+        && !env.is_empty() {
             return Some(PathBuf::from(env).join("install").join("cache"));
         }
-    }
     crate::fs_util::home_dir().map(|h| h.join(".bun").join("install").join("cache"))
 }
 
