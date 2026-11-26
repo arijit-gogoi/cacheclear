@@ -6,7 +6,7 @@
 //! **Never touch `venvs/`** — those are installed tools, not cache.
 //! Symlink rule applies: pipx ephemeral venvs symlink to system Python.
 
-use crate::fs_util::{dir_size, safe_rm_contents};
+use crate::fs_util::{dir_size, rm_contents_cancellable};
 use crate::manager::{Manager, ManagerResult, Plan, RunCtx};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
@@ -147,7 +147,7 @@ impl Manager for Pipx {
                 total_freed = total_freed.saturating_add(dir_size(&cache).unwrap_or(0));
                 continue;
             }
-            match safe_rm_contents(&cache) {
+            match rm_contents_cancellable(cache.clone()).await {
                 Ok(freed) => total_freed = total_freed.saturating_add(freed),
                 Err(e) => {
                     return ManagerResult::Failed {

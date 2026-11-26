@@ -10,6 +10,8 @@ use fs2::FileExt;
 use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use walkdir::WalkDir;
 
 /// Canonicalize + (on Windows) `\\?\`-prefix. Use this once at the top of any
@@ -136,7 +138,15 @@ pub fn dir_size(root: &Path) -> io::Result<u64> {
 /// - Below the root: never follow symlinks. Symlink entries are removed via
 ///   `fs::remove_file` on the link itself — never traversed into.
 /// - Sanity check: if the canonical root resolves to a system path, refuse.
+#[cfg(test)]
 pub fn safe_rm_contents(root: &Path) -> io::Result<u64> {
+    safe_rm_contents_until(root, &AtomicBool::new(false))
+}
+
+/// `safe_rm_contents` that stops early once `cancel` is set, returning
+/// `ErrorKind::Interrupted`. Checked before each entry, so at most one more
+/// file is removed after cancellation.
+pub fn safe_rm_contents_until(root: &Path, cancel: &AtomicBool) -> io::Result<u64> {
     if !root.exists() {
         return Ok(0);
     }
@@ -164,9 +174,16 @@ pub fn safe_rm_contents(root: &Path) -> io::Result<u64> {
         .contents_first(true) // children before parents → safe rmdir order
         .into_iter()
         .filter_map(Result::ok)
+        .take_while(|_| !cancel.load(Ordering::Relaxed))
         .collect();
+    if cancel.load(Ordering::Relaxed) {
+        return Err(cancelled());
+    }
 
     for entry in entries {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(cancelled());
+        }
         let path = entry.path();
         let file_type = entry.file_type();
 
@@ -194,6 +211,33 @@ pub fn safe_rm_contents(root: &Path) -> io::Result<u64> {
     }
 
     Ok(freed)
+}
+
+fn cancelled() -> io::Error {
+    io::Error::new(io::ErrorKind::Interrupted, "cancelled (timed out)")
+}
+
+/// Sets the flag when dropped. Dropping the future that owns it (the
+/// runner's `--timeout` firing) therefore stops the blocking walk.
+struct CancelOnDrop(Arc<AtomicBool>);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Async, interruptible `safe_rm_contents`.
+///
+/// Runs the walk on tokio's blocking pool, so the calling task yields and
+/// `tokio::time::timeout` can fire. If this future is dropped before the
+/// walk finishes, the walk stops at the next entry.
+pub async fn rm_contents_cancellable(root: PathBuf) -> io::Result<u64> {
+    let flag = Arc::new(AtomicBool::new(false));
+    let _guard = CancelOnDrop(flag.clone());
+    tokio::task::spawn_blocking(move || safe_rm_contents_until(&root, &flag))
+        .await
+        .map_err(io::Error::other)?
 }
 
 /// Display-friendly view of a path: on Windows, strip the `\\?\` prefix via
@@ -242,4 +286,49 @@ fn is_lock_contended(e: &io::Error) -> bool {
     e.kind() == io::ErrorKind::WouldBlock
         || (e.raw_os_error().is_some()
             && e.raw_os_error() == fs2::lock_contended_error().raw_os_error())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tree() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..20 {
+            let p = dir.path().join(format!("d{i}")).join("f.bin");
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, b"x").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn cancelled_walk_deletes_nothing() {
+        let dir = tree();
+        let err = safe_rm_contents_until(dir.path(), &AtomicBool::new(true)).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 20);
+    }
+
+    #[test]
+    fn uncancelled_walk_clears_contents_only() {
+        let dir = tree();
+        assert_eq!(safe_rm_contents(dir.path()).unwrap(), 20);
+        assert!(dir.path().exists());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn dropping_guard_sets_cancel_flag() {
+        let flag = Arc::new(AtomicBool::new(false));
+        drop(CancelOnDrop(flag.clone()));
+        assert!(flag.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn cancellable_clears_when_not_dropped() {
+        let dir = tree();
+        assert_eq!(rm_contents_cancellable(dir.path().to_path_buf()).await.unwrap(), 20);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
 }

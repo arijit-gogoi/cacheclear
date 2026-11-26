@@ -6,7 +6,7 @@
 //! Concurrency: try a non-blocking exclusive flock on `$CARGO_HOME/.package-cache`
 //! before deleting; if held, return `SkippedBusy`.
 
-use crate::fs_util::{dir_size, safe_rm_contents, try_lock_exclusive_nonblocking};
+use crate::fs_util::{dir_size, rm_contents_cancellable, try_lock_exclusive_nonblocking};
 use crate::manager::{Manager, ManagerResult, Plan, RunCtx};
 use async_trait::async_trait;
 use std::path::PathBuf;
@@ -108,7 +108,7 @@ impl Manager for Cargo {
                 }
                 continue;
             }
-            match safe_rm_contents(&path) {
+            match rm_contents_cancellable(path.clone()).await {
                 Ok(freed) => {
                     total_freed = total_freed.saturating_add(freed);
                 }
