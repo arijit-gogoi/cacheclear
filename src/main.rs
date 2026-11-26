@@ -83,7 +83,10 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let results = runner::run_all(managers, ctx).await;
+    // Live board only for humans: --json wants clean output and -v's
+    // child output would interleave with the redrawn lines.
+    let live_board = !cli.json && !cli.verbose;
+    let results = runner::run_all(managers, ctx, live_board).await;
     if cli.json {
         report::emit_json_run(&results);
     } else {

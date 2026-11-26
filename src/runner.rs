@@ -28,30 +28,72 @@
 
 use crate::fs_util::dir_size;
 use crate::manager::{Manager, ManagerResult, RunCtx};
+use crate::report::{format_bytes, format_duration};
 use futures::future::join_all;
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::time::timeout;
 
 /// Run every manager in parallel, honouring `ctx.timeout` per task.
 ///
 /// Returns one `(name, result)` per input manager, in input order.
+///
+/// With live_board, draws one status line per manager on stderr while the
+/// run is in progress (pending, running, then the outcome), and clears the
+/// board before returning so the caller can print the final table. indicatif
+/// draws nothing when stderr is not a terminal.
 pub async fn run_all(
     managers: Vec<Arc<dyn Manager>>,
     ctx: RunCtx,
+    live_board: bool,
 ) -> Vec<(String, ManagerResult)> {
+    let multi = if live_board {
+        MultiProgress::new()
+    } else {
+        MultiProgress::with_draw_target(ProgressDrawTarget::hidden())
+    };
+    let style = ProgressStyle::with_template("  {spinner} {prefix:<8} {msg}")
+        .expect("valid template")
+        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ");
+    let finished = ProgressStyle::with_template("  {msg}").expect("valid template");
+
     let tasks = managers.into_iter().map(|m| {
         let ctx = ctx.clone();
+        let finished = finished.clone();
+        let bar = multi.add(ProgressBar::new_spinner());
+        bar.set_style(style.clone());
+        bar.set_prefix(m.name());
+        bar.set_message("pending");
         async move {
+            bar.enable_steady_tick(Duration::from_millis(100));
             let name = m.name().to_string();
-            let result = run_one(m.as_ref(), &ctx).await;
+            let result = run_one(m.as_ref(), &ctx, &bar).await;
+            bar.set_style(finished);
+            bar.finish_with_message(board_outcome(&name, &result));
             (name, result)
         }
     });
-    join_all(tasks).await
+    let results = join_all(tasks).await;
+    let _ = multi.clear();
+    results
+}
+
+/// Short outcome text for a finished line on the live board.
+fn board_outcome(name: &str, r: &ManagerResult) -> String {
+    match r {
+        ManagerResult::Done { freed, took } => {
+            format!("✓ {name:<8} done     {} ({})", format_bytes(*freed), format_duration(*took))
+        }
+        ManagerResult::SkippedMissing => format!("⊘ {name:<8} skipped  not installed"),
+        ManagerResult::SkippedBusy { reason } => format!("⊘ {name:<8} skipped  busy: {reason}"),
+        ManagerResult::Failed { error } => format!("✗ {name:<8} failed   {error}"),
+    }
 }
 
 /// Run a single manager: detect, probe-before, execute under timeout, probe-after.
-async fn run_one(manager: &dyn Manager, ctx: &RunCtx) -> ManagerResult {
+async fn run_one(manager: &dyn Manager, ctx: &RunCtx, bar: &ProgressBar) -> ManagerResult {
+    bar.set_message("detecting");
     if !manager.detect().await {
         return ManagerResult::SkippedMissing;
     }
@@ -68,6 +110,7 @@ async fn run_one(manager: &dyn Manager, ctx: &RunCtx) -> ManagerResult {
         .as_ref()
         .and_then(|p| dir_size(p).ok());
 
+    bar.set_message("running");
     let result = match timeout(ctx.timeout, manager.execute(ctx)).await {
         Ok(result) => result,
         Err(_elapsed) => {
