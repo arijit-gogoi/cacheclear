@@ -116,7 +116,7 @@ These aren't aspirational. They're tested on Linux, macOS, and Windows in CI.
 ## Status & roadmap
 
 - **Phase 1 — MVP (done):** parallel clear for all 7 managers, auto-detection, final status table, size reporting, `--only`/`--skip`/`--dry-run`/`-v`/`--timeout`, exit codes, sandboxed-home tests, CI on three OSes.
-- **Phase 2 — polish & distribution (in progress):** `--json` output with schema (done), live `indicatif` status board, `cargo-dist` release binaries, Homebrew formula, crates.io publish.
+- **Phase 2 — polish & distribution (in progress):** done: `--json` output with schema, live status board, `cargo-dist` release config (Linux/macOS x86_64 + aarch64, Windows x86_64; shell and PowerShell installers). Not yet: first tagged release, Homebrew formula, crates.io publish.
 - **Phase 3 — more managers:** poetry, yarn (classic + berry), deno, go, gem, nuget, composer, maven, gradle.
 
 See [`spec/SPEC.md`](spec/SPEC.md) for the full design rationale.

@@ -32,16 +32,16 @@ A single command that reclaims disk space from the accumulated caches of every l
 
 | # | Feature | Status | Priority | Notes |
 |---|---|---|---|---|
-| 1 | Parallel cache clear for 7 managers (uv, pip, pipx, cargo, npm, pnpm, bun) | 📋 Planned | High | Core MVP |
-| 2 | Auto-detect which managers are installed (skip missing) | 📋 Planned | High | Prevents spurious errors |
-| 3 | Per-manager live status board (pending / running / done / failed / skipped) | 📋 Planned (Phase 2) | High | UX backbone. Phase 1 ships a final status table instead. |
-| 4 | Size reporting: bytes freed per manager + total | 📋 Planned | High | The headline result |
-| 5 | `--dry-run` — show what would run, don't execute | 📋 Planned | High | Safety |
-| 6 | `--only <list>` and `--skip <list>` filters | 📋 Planned | High | Surgical runs |
-| 7 | `-v/--verbose` — stream child stdout/stderr | 📋 Planned | Medium | Debugging |
-| 8 | `--json` output for scripting | 📋 Planned | Medium | CI integrations |
-| 9 | `--timeout <secs>` per manager | 📋 Planned | Medium | Don't hang forever |
-| 10 | Exit codes: 0 ok, 1 one or more failed, 2 usage error | 📋 Planned | High | Scriptable |
+| 1 | Parallel cache clear for 7 managers (uv, pip, pipx, cargo, npm, pnpm, bun) | ✅ Done | High | Core MVP |
+| 2 | Auto-detect which managers are installed (skip missing) | ✅ Done | High | Prevents spurious errors |
+| 3 | Per-manager live status board (pending / running / done / failed / skipped) | ✅ Done | High | UX backbone. Shipped in Phase 2; off for `--json` / `-v`. |
+| 4 | Size reporting: bytes freed per manager + total | ✅ Done | High | The headline result |
+| 5 | `--dry-run` — show what would run, don't execute | ✅ Done | High | Safety |
+| 6 | `--only <list>` and `--skip <list>` filters | ✅ Done | High | Surgical runs |
+| 7 | `-v/--verbose` — stream child stdout/stderr | ✅ Done | Medium | Debugging |
+| 8 | `--json` output for scripting | ✅ Done | Medium | CI integrations |
+| 9 | `--timeout <secs>` per manager | ✅ Done | Medium | Don't hang forever |
+| 10 | Exit codes: 0 ok, 1 one or more failed, 2 usage error | ✅ Done | High | Scriptable |
 | 11 | Extra managers (poetry, yarn, deno, go, gem, maven, gradle, nuget) | 📋 Planned | Low | Post-v1 |
 | 12 | Config file `~/.config/cacheclear/config.toml` for defaults | 📋 Planned | Low | Post-v1 |
 | 13 | `--aggressive` vs `--safe` profiles | ⏸ Deferred | Low | Unclear it adds value; revisit after real use |
