@@ -1,5 +1,5 @@
 # `cacheclear` — SPEC
-_Last updated: 2026-04-24_
+_Last updated: 2026-11-26_
 
 A Rust CLI that clears the download/build caches of common package managers in parallel, **without ever uninstalling anything**.
 
@@ -34,7 +34,7 @@ A single command that reclaims disk space from the accumulated caches of every l
 |---|---|---|---|---|
 | 1 | Parallel cache clear for 7 managers (uv, pip, pipx, cargo, npm, pnpm, bun) | 📋 Planned | High | Core MVP |
 | 2 | Auto-detect which managers are installed (skip missing) | 📋 Planned | High | Prevents spurious errors |
-| 3 | Per-manager live status board (pending / running / done / failed / skipped) | 📋 Planned | High | UX backbone |
+| 3 | Per-manager live status board (pending / running / done / failed / skipped) | 📋 Planned (Phase 2) | High | UX backbone. Phase 1 ships a final status table instead. |
 | 4 | Size reporting: bytes freed per manager + total | 📋 Planned | High | The headline result |
 | 5 | `--dry-run` — show what would run, don't execute | 📋 Planned | High | Safety |
 | 6 | `--only <list>` and `--skip <list>` filters | 📋 Planned | High | Surgical runs |
@@ -56,7 +56,7 @@ This is the contract. For each supported manager, here is the exact action taken
 |---|---|---|---|
 | **uv** | `uv --version` | `uv cache clean` | Clears download/build cache; does not remove installed tools/projects. |
 | **pip** | `pip --version` (and try `pip3` as fallback) | `pip cache purge` | Documented cache-only command; never uninstalls. |
-| **pipx** | `pipx --version` | Delete contents of pipx cache dir: `$PIPX_HOME/.cache` if set, else `~/.local/pipx/.cache` (Linux/macOS) or `%LOCALAPPDATA%\pipx\pipx\.cache` (Windows). **Do NOT touch `venvs/`.** | pipx has no `cache clean` command ([pypa/pipx#1681](https://github.com/pypa/pipx/issues/1681)). Cache dir stores only ephemeral `pipx run` envs. |
+| **pipx** | `pipx --version` | Delete contents of every pipx venv cache dir that exists: `$PIPX_HOME/.cache` if set; pipx's own answer (`pipx environment --value PIPX_VENV_CACHEDIR`, plus `<PIPX_HOME>/.cache` left over from pre-1.3 layouts); else defaults `%LOCALAPPDATA%\pipx\pipx\Cache` (Windows), `~/Library/Caches/pipx` (macOS), `$XDG_CACHE_HOME/pipx` or `~/.cache/pipx` (Linux), and legacy `~/.local/pipx/.cache` / `~\pipx\.cache`. **Do NOT touch `venvs/`.** | pipx has no `cache clean` command ([pypa/pipx#1681](https://github.com/pypa/pipx/issues/1681)). Cache dir stores only ephemeral `pipx run` envs. |
 | **cargo** | `cargo --version` | Delete contents of these dirs under `$CARGO_HOME` (default `~/.cargo`): `registry/cache/*`, `registry/src/*`, `git/db/*`, `git/checkouts/*`. **Do NOT touch `bin/` or `registry/index/`.** | Cargo has no cache command. These four dirs are documented as "safe to delete, will be re-downloaded." |
 | **npm** | `npm --version` | `npm cache clean --force` | `--force` is required by npm; command only removes cache, not installed packages. |
 | **pnpm** | `pnpm --version` | `pnpm store prune` | Removes unreferenced packages from the content-addressable store. Do NOT delete the store dir wholesale — that would break every pnpm project symlinking into it. |
@@ -257,12 +257,14 @@ This way "shell out to a subcommand" and "delete a directory" are both just impl
 |---|---|---|
 | Parallelism model | `tokio` + `join_all`, one task per manager | Subprocesses + streaming child output are a natural fit for async; `indicatif` progress bars update cleanly from multiple tasks |
 | cargo clearing | Direct directory removal (no dep on `cargo-cache`) | `cargo-cache` isn't ubiquitous; the four dirs are documented-safe; keeps us dependency-free at runtime |
-| pipx clearing | Direct cache-dir removal, explicitly scoped to `.cache` | No official command exists; scoping to `.cache` (never `venvs/`) preserves the uninstall-nothing invariant |
+| pipx clearing | Direct cache-dir removal, explicitly scoped to pipx's venv cache dirs (current + legacy) | No official command exists; scoping to the cache dirs (never `venvs/`) preserves the uninstall-nothing invariant. pipx 1.3 moved the cache, so ask pipx first and also clear the leftover legacy dir. |
 | pnpm clearing | `pnpm store prune` (not a full store wipe) | Wiping pnpm's content-addressable store breaks every project symlinking into it — that would violate the "don't uninstall" contract in spirit |
 | Unknown / missing manager | Skip silently (still listed in output as "skipped") | Opinionated default: most users don't have all seven installed |
 | Default verbosity | Summarized status board; child output hidden unless `-v` | The board is the product; raw npm/cargo output is noise by default |
 | Symlinks | Canonicalize the cache root once; never follow links below it; refuse to operate if the resolved root is at or above a system path | Pipx venvs symlink to system Python — naive recursion could uninstall the interpreter. Two-rule policy preserves user-relocated caches while making interior link traversal impossible. |
 | Concurrent installs | Non-blocking flock on cargo's `.package-cache` and pnpm's store lock; skip-if-busy, don't wait | Direct dir removal can corrupt an in-progress cargo extraction. Skipping is more honest than silently delaying a user's active build. |
+| `--only` / `--skip` | Names validated by clap (unknown name = usage error, exit 2). `--only` applies first, then `--skip`. Filtered-out managers are left out of the report. | Typos must not silently widen a run. A filtered-out manager was not asked about, so listing it as "skipped" is noise. |
+| Home directory | On Windows, honour `USERPROFILE` before the shell profile folder | Matches `std::env::home_dir` (Rust 1.86+) and makes the sandboxed-home tests hermetic. |
 | Windows long paths | Always `\\?\`-prefix the canonicalized cache root on Windows; do not rely on OS `LongPathsEnabled` opt-in | Cargo / pnpm / npm cache trees routinely exceed 260 chars. Relying on user OS configuration makes the tool fragile. Single helper covers all entry points. |
 
 ---
@@ -288,7 +290,7 @@ This way "shell out to a subcommand" and "delete a directory" are both just impl
 **Features included:**
 - Parallel clear for all 7 managers (matrix above)
 - Auto-detection + skip-if-missing
-- Live status board via `indicatif`
+- Final per-manager status table (the live `indicatif` board moved to Phase 2)
 - Size-freed reporting
 - `--only`, `--skip`, `--dry-run`, `-v`, `--timeout`
 - Exit codes 0/1/2
@@ -308,6 +310,7 @@ This way "shell out to a subcommand" and "delete a directory" are both just impl
 
 **Features included:**
 - `--json` output
+- Live status board via `indicatif` (moved from Phase 1: it must not garble `-v` child output or `--json`)
 - `cargo-dist` multi-platform release binaries (x86_64 + aarch64 for Linux/macOS, x86_64 Windows)
 - Homebrew formula
 - README with benchmark numbers
