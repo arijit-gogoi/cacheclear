@@ -21,7 +21,7 @@ fn cargo_home() -> Option<PathBuf> {
             return Some(PathBuf::from(env));
         }
     }
-    dirs::home_dir().map(|h| h.join(".cargo"))
+    crate::fs_util::home_dir().map(|h| h.join(".cargo"))
 }
 
 /// The four documented-safe-to-delete dirs (relative to `$CARGO_HOME`).

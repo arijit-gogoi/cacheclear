@@ -30,6 +30,25 @@ pub fn prepare_root(p: &Path) -> io::Result<PathBuf> {
     fs::canonicalize(p)
 }
 
+/// The user's home directory. Every manager resolves home-relative cache
+/// paths through this, never through `dirs::home_dir()` directly.
+///
+/// On Windows, `dirs::home_dir()` asks the shell for the profile folder and
+/// ignores `USERPROFILE`. We honour `USERPROFILE` first (as `std::env::home_dir`
+/// does since Rust 1.86), so an overridden or sandboxed home is respected.
+/// On Unix, `dirs::home_dir()` already honours `HOME`.
+pub fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        if let Some(p) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
+            if p.is_absolute() {
+                return Some(p);
+            }
+        }
+    }
+    dirs::home_dir()
+}
+
 /// Refuse if the resolved path is at or above a system root.
 ///
 /// Per `spec/SPEC.md` §"Symlink Policy": "after canonicalizing the cache root,
@@ -56,9 +75,9 @@ pub fn is_safe_root(canonical: &Path) -> bool {
     {
         forbidden.extend([r"C:\", r"C:\Users"].iter().map(PathBuf::from));
     }
-    if let Some(home) = dirs::home_dir() {
-        forbidden.push(home);
-    }
+    // Both the env-based home and the OS profile dir, in case they differ.
+    forbidden.extend(home_dir());
+    forbidden.extend(dirs::home_dir());
 
     for f in &forbidden {
         if display == *f {
@@ -208,7 +227,19 @@ pub fn try_lock_exclusive_nonblocking(path: &Path) -> io::Result<Option<File>> {
     let file = File::open(path)?;
     match file.try_lock_exclusive() {
         Ok(()) => Ok(Some(file)),
-        Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(None),
+        Err(e) if is_lock_contended(&e) => Ok(None),
         Err(e) => Err(e),
     }
+}
+
+/// True if `e` means "another process holds the lock".
+///
+/// Unix reports `EWOULDBLOCK`, which maps to `ErrorKind::WouldBlock`.
+/// Windows reports `ERROR_LOCK_VIOLATION` (os error 33), which Rust maps to
+/// `ErrorKind::Uncategorized`, so a kind check alone misses it. Compare the
+/// raw OS error against fs2's own contended-lock error instead.
+fn is_lock_contended(e: &io::Error) -> bool {
+    e.kind() == io::ErrorKind::WouldBlock
+        || (e.raw_os_error().is_some()
+            && e.raw_os_error() == fs2::lock_contended_error().raw_os_error())
 }

@@ -20,7 +20,7 @@ fn cache_dir_path() -> Option<PathBuf> {
             return Some(PathBuf::from(env).join("install").join("cache"));
         }
     }
-    dirs::home_dir().map(|h| h.join(".bun").join("install").join("cache"))
+    crate::fs_util::home_dir().map(|h| h.join(".bun").join("install").join("cache"))
 }
 
 #[async_trait]
