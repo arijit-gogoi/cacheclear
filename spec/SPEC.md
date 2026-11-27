@@ -45,8 +45,8 @@ A single command that reclaims disk space from the accumulated caches of every l
 | 11 | Extra managers (poetry, yarn, deno, go, gem, maven, gradle, nuget) | 📋 Planned | Low | Post-v1 |
 | 12 | Config file `~/.config/cacheclear/config.toml` for defaults | 📋 Planned | Low | Post-v1 |
 | 13 | `--aggressive` vs `--safe` profiles | ⏸ Deferred | Low | Unclear it adds value; revisit after real use |
-| 14 | `--keep-registry` — cargo keeps `registry/cache` + `registry/src`, clears only `git/db` + `git/checkouts` | ✅ Done | Medium | A full clear makes the next cargo build re-download every crate. Added 2026-11-27. |
-| 15 | scoop manager (Windows): `scoop cache rm -a` | ✅ Done | Medium | First Phase 3 manager. Added 2026-11-27. Never `scoop cleanup` (see matrix). |
+| 14 | `--keep-registry` — cargo keeps `registry/cache` + `registry/src`, clears only `git/db` + `git/checkouts` | ✅ Done | Medium | A full clear makes the next cargo build re-download every crate. Added 2026-11-27, in 0.2.0. |
+| 15 | scoop manager (Windows): `scoop cache rm -a` | ✅ Done | Medium | First Phase 3 manager. Added 2026-11-27, in 0.2.0. Never `scoop cleanup` (see matrix). |
 
 ---
 
@@ -160,7 +160,7 @@ OPTIONS:
   -v, --verbose        Stream child process output
   --timeout <secs>     Kill any single manager that runs longer (default: 120)
   --keep-registry      cargo only: keep registry/cache and registry/src,
-                       clear only git/db and git/checkouts
+                       clear only git/db and git/checkouts (0.2.0+)
   --no-color           Disable color output
   -h, --help           Show help
   -V, --version        Show version

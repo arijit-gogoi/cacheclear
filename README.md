@@ -52,10 +52,10 @@ cacheclear --skip bun        # everything except these
 cacheclear -v                # stream child process output
 cacheclear --json            # machine-readable output
 cacheclear --timeout 60      # stop any single manager after 60 s (default 120)
-cacheclear --keep-registry   # cargo: keep downloaded crates, clear only its git caches
+cacheclear --keep-registry   # cargo: keep downloaded crates, clear only its git caches (0.2.0+)
 ```
 
-Manager names for `--only` / `--skip`: `uv`, `pip`, `pipx`, `cargo`, `npm`, `pnpm`, `bun`, `scoop` (Windows only). An unknown name is a usage error (exit 2), so a typo never widens a run. If both flags are given, `--only` applies first, then `--skip`. Managers filtered out are left out of the report.
+Manager names for `--only` / `--skip`: `uv`, `pip`, `pipx`, `cargo`, `npm`, `pnpm`, `bun`, `scoop` (Windows only, 0.2.0+). An unknown name is a usage error (exit 2), so a typo never widens a run. If both flags are given, `--only` applies first, then `--skip`. Managers filtered out are left out of the report.
 
 `--dry-run` prints a per-manager plan with concrete paths and a total:
 
@@ -89,11 +89,11 @@ Dry-run sizes are upper bounds for npm and pnpm: they measure the whole cache di
 | **uv**    | `uv cache clean` | Documented cache-only command. |
 | **pip**   | `pip cache purge` | Documented cache-only command. Tries `pip3` fallback. |
 | **pipx**  | Deletes contents of every pipx venv cache dir that exists: the one pipx reports (`PIPX_VENV_CACHEDIR`), `$PIPX_HOME/.cache`, and pre-1.3 leftovers such as `~/.local/pipx/.cache`. | **Never touches `venvs/`** — those are installed tools. |
-| **cargo** | Deletes contents of `registry/cache`, `registry/src`, `git/db`, `git/checkouts` under `$CARGO_HOME`. With `--keep-registry`, keeps `registry/cache` and `registry/src` (so the next build doesn't re-download every crate) and clears only `git/db` and `git/checkouts`. | **Never touches `bin/` or `registry/index/`.** Each of these four dirs is documented as safe to delete; cargo re-downloads as needed. |
+| **cargo** | Deletes contents of `registry/cache`, `registry/src`, `git/db`, `git/checkouts` under `$CARGO_HOME`. With `--keep-registry` (0.2.0+), keeps `registry/cache` and `registry/src` (so the next build doesn't re-download every crate) and clears only `git/db` and `git/checkouts`. | **Never touches `bin/` or `registry/index/`.** Each of these four dirs is documented as safe to delete; cargo re-downloads as needed. |
 | **npm**   | `npm cache clean --force` | The `--force` flag is required by npm itself — it refuses without it. |
 | **pnpm**  | `pnpm store prune` | Removes only unreferenced packages. **Never wipes the store dir** — every project on the machine links into it. |
 | **bun**   | `bun pm --global cache rm` | Clears `~/.bun/install/cache`. Doesn't uninstall anything. |
-| **scoop** (Windows) | `scoop cache rm -a` | Clears scoop's download cache (`~\scoop\cache`, or `SCOOP_CACHE` / config `cache_path`). **Never runs `scoop cleanup`**: that deletes old installed app versions, which `scoop reset` can roll back to. |
+| **scoop** (Windows, 0.2.0+) | `scoop cache rm -a` | Clears scoop's download cache (`~\scoop\cache`, or `SCOOP_CACHE` / config `cache_path`). **Never runs `scoop cleanup`**: that deletes old installed app versions, which `scoop reset` can roll back to. |
 
 ## Safety guarantees
 
@@ -123,6 +123,7 @@ These aren't aspirational. They're tested on Linux, macOS, and Windows in CI.
 
 ## Status & roadmap
 
+- **0.2.0 (unreleased):** adds `--keep-registry` and the scoop manager, and fixes mixed path separators (`.cargo\registry/cache`) in Windows dry-run and `--json` output. Until it is published, `cargo install cacheclear` gets 0.1.0; build from source to use these.
 - **Phase 1 — MVP (done):** parallel clear for all 7 managers, auto-detection, final status table, size reporting, `--only`/`--skip`/`--dry-run`/`-v`/`--timeout`, exit codes, sandboxed-home tests, CI on three OSes.
 - **Phase 2 — polish & distribution (in progress):** done: `--json` output with schema, live status board, `cargo-dist` release config (Linux/macOS x86_64 + aarch64, Windows x86_64; shell and PowerShell installers). v0.1.0 published to crates.io with GitHub release binaries. Not yet: Homebrew formula.
 - **Phase 3 — more managers:** done: scoop (Windows). Next: poetry, yarn (classic + berry), deno, go, gem, nuget, composer, maven, gradle.
