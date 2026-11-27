@@ -66,10 +66,10 @@ DRY RUN — no caches will be modified.
   • pipx     0 B         delete contents of pipx venv cache dirs (NEVER `venvs/`)
       └─ C:\Users\you\pipx\.cache
   • cargo    167.1 MB    delete contents of cargo registry/cache, registry/src, git/db, git/checkouts
-      └─ C:\Users\you\.cargo\registry/cache
-      └─ C:\Users\you\.cargo\registry/src
-      └─ C:\Users\you\.cargo\git/db
-      └─ C:\Users\you\.cargo\git/checkouts
+      └─ C:\Users\you\.cargo\registry\cache
+      └─ C:\Users\you\.cargo\registry\src
+      └─ C:\Users\you\.cargo\git\db
+      └─ C:\Users\you\.cargo\git\checkouts
   • npm      3.4 GB      run `npm cache clean --force`
   • pnpm     484.3 MB    run `pnpm store prune`
   • bun      2.3 GB      run `bun pm --global cache rm`

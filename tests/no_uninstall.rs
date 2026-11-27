@@ -23,7 +23,8 @@
 //! the only managers detectable (via cache-dir existence).
 //!
 //! Other tests in this file cover `--only` / `--skip`, `--dry-run` touching
-//! nothing, a busy cargo lock, and Windows long paths.
+//! nothing, a busy cargo lock, Windows long paths, and path separators in
+//! the dry-run plan.
 
 use assert_cmd::Command;
 use std::collections::BTreeMap;
@@ -239,6 +240,34 @@ fn stdout(o: &Output) -> String {
     String::from_utf8_lossy(&o.stdout).into_owned()
 }
 
+/// cargo's plan `paths` from `--dry-run --json --only cargo` plus `extra` args.
+fn cargo_plan_paths(fake: &FakeHome, extra: &[&str]) -> Vec<String> {
+    let mut args = vec!["--dry-run", "--json", "--only", "cargo"];
+    args.extend_from_slice(extra);
+    let output = fake.run(&args);
+    assert!(output.status.success(), "args {args:?}");
+    let doc: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout is one JSON document");
+    let entry = &doc["plan"][0];
+    assert_eq!(entry["manager"], "cargo");
+    entry["paths"]
+        .as_array()
+        .expect("plan entry has paths")
+        .iter()
+        .map(|p| p.as_str().expect("path is a string").to_owned())
+        .collect()
+}
+
+/// `$HOME/.cargo/<top>/<sub>`, built one component at a time, as a string.
+fn cargo_dir(fake: &FakeHome, top: &str, sub: &str) -> String {
+    fake.home()
+        .join(".cargo")
+        .join(top)
+        .join(sub)
+        .display()
+        .to_string()
+}
+
 #[test]
 fn no_uninstall_invariant_holds_against_fake_home() {
     let fake = FakeHome::new().expect("setting up fake $HOME");
@@ -384,4 +413,21 @@ fn json_output_matches_schema() {
         assert!(errors.is_empty(), "args {args:?}: schema errors: {errors:#?}");
         assert_eq!(doc["mode"], mode);
     }
+}
+
+/// Plan paths use the platform separator throughout. Regression: cargo
+/// joined `"registry/cache"` in one piece, so Windows printed
+/// `.cargo\registry/cache`. Only Windows can catch that; CI runs it.
+#[test]
+fn cargo_plan_paths_use_platform_separator() {
+    let fake = FakeHome::new().expect("setting up fake $HOME");
+    assert_eq!(
+        cargo_plan_paths(&fake, &[]),
+        [
+            cargo_dir(&fake, "registry", "cache"),
+            cargo_dir(&fake, "registry", "src"),
+            cargo_dir(&fake, "git", "db"),
+            cargo_dir(&fake, "git", "checkouts"),
+        ]
+    );
 }

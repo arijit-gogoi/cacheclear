@@ -9,7 +9,7 @@
 use crate::fs_util::{dir_size, rm_contents_cancellable, try_lock_exclusive_nonblocking};
 use crate::manager::{Manager, ManagerResult, Plan, RunCtx};
 use async_trait::async_trait;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 pub struct Cargo;
@@ -24,12 +24,21 @@ fn cargo_home() -> Option<PathBuf> {
 }
 
 /// The four documented-safe-to-delete dirs (relative to `$CARGO_HOME`).
-const SAFE_DIRS: &[&str] = &[
-    "registry/cache",
-    "registry/src",
-    "git/db",
-    "git/checkouts",
+///
+/// Stored as separate components and joined one at a time by `safe_dir`:
+/// `Path::join("registry/cache")` keeps the `/` as written, so Windows output
+/// showed `.cargo\registry/cache`.
+const SAFE_DIRS: [[&str; 2]; 4] = [
+    ["registry", "cache"],
+    ["registry", "src"],
+    ["git", "db"],
+    ["git", "checkouts"],
 ];
+
+/// `home/top/sub`, with the platform's separator between every part.
+fn safe_dir(home: &Path, [top, sub]: [&str; 2]) -> PathBuf {
+    home.join(top).join(sub)
+}
 
 #[async_trait]
 impl Manager for Cargo {
@@ -47,14 +56,14 @@ impl Manager for Cargo {
             return true;
         }
         if let Some(home) = cargo_home() {
-            return SAFE_DIRS.iter().any(|d| home.join(d).exists());
+            return SAFE_DIRS.into_iter().any(|d| safe_dir(&home, d).exists());
         }
         false
     }
 
     fn plan(&self) -> Plan {
         let paths = cargo_home()
-            .map(|h| SAFE_DIRS.iter().map(|d| h.join(d)).collect::<Vec<_>>())
+            .map(|h| SAFE_DIRS.into_iter().map(|d| safe_dir(&h, d)).collect())
             .unwrap_or_default();
         Plan {
             description: "delete contents of cargo registry/cache, registry/src, git/db, git/checkouts".into(),
@@ -95,8 +104,8 @@ impl Manager for Cargo {
         let started = Instant::now();
         let mut total_freed: u64 = 0;
 
-        for sub in SAFE_DIRS {
-            let path = home.join(sub);
+        for d in SAFE_DIRS {
+            let path = safe_dir(&home, d);
             if !path.exists() {
                 continue;
             }
@@ -123,5 +132,17 @@ impl Manager for Cargo {
             freed: total_freed,
             took: started.elapsed(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::MAIN_SEPARATOR as SEP;
+
+    #[test]
+    fn safe_dir_uses_platform_separator() {
+        let p = safe_dir(Path::new("home"), ["registry", "cache"]);
+        assert_eq!(p.to_string_lossy(), format!("home{SEP}registry{SEP}cache"));
     }
 }
