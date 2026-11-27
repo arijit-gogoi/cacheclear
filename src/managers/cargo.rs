@@ -1,6 +1,7 @@
 //! cargo: direct-deletion manager — cargo has no cache command.
 //! Under `$CARGO_HOME` (default `~/.cargo`) we delete contents of:
 //!   registry/cache/*  registry/src/*  git/db/*  git/checkouts/*
+//! With `--keep-registry`, only the two `git/` dirs are cleared.
 //! **Never touch `bin/`** (installed binaries) or **`registry/index/`** (metadata).
 //!
 //! Concurrency: try a non-blocking exclusive flock on `$CARGO_HOME/.package-cache`
@@ -12,7 +13,12 @@ use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-pub struct Cargo;
+#[derive(Debug, Default)]
+pub struct Cargo {
+    /// `--keep-registry`: leave `registry/cache` and `registry/src` alone
+    /// (the downloaded crates), so the next build doesn't re-download them.
+    pub keep_registry: bool,
+}
 
 /// Resolve `$CARGO_HOME` honoring the env var; fall back to `~/.cargo`.
 fn cargo_home() -> Option<PathBuf> {
@@ -40,6 +46,17 @@ fn safe_dir(home: &Path, [top, sub]: [&str; 2]) -> PathBuf {
     home.join(top).join(sub)
 }
 
+impl Cargo {
+    /// The safe dirs this run clears: all four, or only the `git/` ones
+    /// with `--keep-registry`.
+    fn dirs(&self) -> Vec<[&'static str; 2]> {
+        SAFE_DIRS
+            .into_iter()
+            .filter(|[top, _]| !(self.keep_registry && *top == "registry"))
+            .collect()
+    }
+}
+
 #[async_trait]
 impl Manager for Cargo {
     fn name(&self) -> &'static str {
@@ -55,6 +72,8 @@ impl Manager for Cargo {
         if which::which("cargo").is_ok() {
             return true;
         }
+        // All four dirs, even with `--keep-registry`: this asks "is cargo
+        // here?", not "is there anything to clear?".
         if let Some(home) = cargo_home() {
             return SAFE_DIRS.into_iter().any(|d| safe_dir(&home, d).exists());
         }
@@ -63,10 +82,17 @@ impl Manager for Cargo {
 
     fn plan(&self) -> Plan {
         let paths = cargo_home()
-            .map(|h| SAFE_DIRS.into_iter().map(|d| safe_dir(&h, d)).collect())
+            .map(|h| self.dirs().into_iter().map(|d| safe_dir(&h, d)).collect())
             .unwrap_or_default();
+        // Prose, not joined paths: always written with `/`, so the text is
+        // the same on every OS (including in `--json`).
+        let description = if self.keep_registry {
+            "delete contents of cargo git/db, git/checkouts (keeping registry/)"
+        } else {
+            "delete contents of cargo registry/cache, registry/src, git/db, git/checkouts"
+        };
         Plan {
-            description: "delete contents of cargo registry/cache, registry/src, git/db, git/checkouts".into(),
+            description: description.into(),
             paths,
         }
     }
@@ -104,7 +130,7 @@ impl Manager for Cargo {
         let started = Instant::now();
         let mut total_freed: u64 = 0;
 
-        for d in SAFE_DIRS {
+        for d in self.dirs() {
             let path = safe_dir(&home, d);
             if !path.exists() {
                 continue;
@@ -139,6 +165,15 @@ impl Manager for Cargo {
 mod tests {
     use super::*;
     use std::path::MAIN_SEPARATOR as SEP;
+
+    #[test]
+    fn keep_registry_clears_only_git_dirs() {
+        assert_eq!(Cargo::default().dirs(), SAFE_DIRS);
+        assert_eq!(
+            Cargo { keep_registry: true }.dirs(),
+            [["git", "db"], ["git", "checkouts"]]
+        );
+    }
 
     #[test]
     fn safe_dir_uses_platform_separator() {

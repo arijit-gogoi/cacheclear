@@ -23,8 +23,8 @@
 //! the only managers detectable (via cache-dir existence).
 //!
 //! Other tests in this file cover `--only` / `--skip`, `--dry-run` touching
-//! nothing, a busy cargo lock, Windows long paths, and path separators in
-//! the dry-run plan.
+//! nothing, a busy cargo lock, Windows long paths, `--keep-registry`, and
+//! path separators in the dry-run plan.
 
 use assert_cmd::Command;
 use std::collections::BTreeMap;
@@ -430,4 +430,41 @@ fn cargo_plan_paths_use_platform_separator() {
             cargo_dir(&fake, "git", "checkouts"),
         ]
     );
+}
+
+/// `--keep-registry` leaves all of `registry/` byte-identical and still
+/// clears cargo's `git/db` and `git/checkouts`.
+#[test]
+fn keep_registry_clears_only_cargo_git_dirs() {
+    let fake = FakeHome::new().expect("setting up fake $HOME");
+    let installed_before = fake.snapshot_installed();
+    let cargo = fake.home().join(".cargo");
+    let registry = cargo.join("registry");
+    let registry_before = snapshot_tree(&registry);
+
+    assert_eq!(
+        cargo_plan_paths(&fake, &["--keep-registry"]),
+        [
+            cargo_dir(&fake, "git", "db"),
+            cargo_dir(&fake, "git", "checkouts"),
+        ]
+    );
+
+    let output = fake.run(&["--only", "cargo", "--keep-registry"]);
+    assert!(output.status.success());
+
+    assert_eq!(
+        registry_before,
+        snapshot_tree(&registry),
+        "--keep-registry changed registry/"
+    );
+    let git: Vec<PathBuf> = fake
+        .cargo_cache
+        .iter()
+        .filter(|p| p.starts_with(cargo.join("git")))
+        .cloned()
+        .collect();
+    assert_eq!(git.len(), 2, "expected the git/db and git/checkouts fixtures");
+    assert_all_gone(&git);
+    assert_installed_untouched(&installed_before);
 }

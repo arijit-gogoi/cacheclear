@@ -52,6 +52,7 @@ cacheclear --skip bun        # everything except these
 cacheclear -v                # stream child process output
 cacheclear --json            # machine-readable output
 cacheclear --timeout 60      # stop any single manager after 60 s (default 120)
+cacheclear --keep-registry   # cargo: keep downloaded crates, clear only its git caches
 ```
 
 Manager names for `--only` / `--skip`: `uv`, `pip`, `pipx`, `cargo`, `npm`, `pnpm`, `bun`. An unknown name is a usage error (exit 2), so a typo never widens a run. If both flags are given, `--only` applies first, then `--skip`. Managers filtered out are left out of the report.
@@ -88,7 +89,7 @@ Dry-run sizes are upper bounds for npm and pnpm: they measure the whole cache di
 | **uv**    | `uv cache clean` | Documented cache-only command. |
 | **pip**   | `pip cache purge` | Documented cache-only command. Tries `pip3` fallback. |
 | **pipx**  | Deletes contents of every pipx venv cache dir that exists: the one pipx reports (`PIPX_VENV_CACHEDIR`), `$PIPX_HOME/.cache`, and pre-1.3 leftovers such as `~/.local/pipx/.cache`. | **Never touches `venvs/`** — those are installed tools. |
-| **cargo** | Deletes contents of `registry/cache`, `registry/src`, `git/db`, `git/checkouts` under `$CARGO_HOME`. | **Never touches `bin/` or `registry/index/`.** Each of these four dirs is documented as safe to delete; cargo re-downloads as needed. |
+| **cargo** | Deletes contents of `registry/cache`, `registry/src`, `git/db`, `git/checkouts` under `$CARGO_HOME`. With `--keep-registry`, keeps `registry/cache` and `registry/src` (so the next build doesn't re-download every crate) and clears only `git/db` and `git/checkouts`. | **Never touches `bin/` or `registry/index/`.** Each of these four dirs is documented as safe to delete; cargo re-downloads as needed. |
 | **npm**   | `npm cache clean --force` | The `--force` flag is required by npm itself — it refuses without it. |
 | **pnpm**  | `pnpm store prune` | Removes only unreferenced packages. **Never wipes the store dir** — every project on the machine links into it. |
 | **bun**   | `bun pm --global cache rm` | Clears `~/.bun/install/cache`. Doesn't uninstall anything. |

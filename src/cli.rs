@@ -3,8 +3,8 @@
 //! Surface (v1, from `spec/SPEC.md`):
 //! ```text
 //! cacheclear [--only LIST] [--skip LIST] [--dry-run] [--json]
-//!            [-v|--verbose] [--timeout SECS] [--no-color]
-//!            [-h|--help] [-V|--version]
+//!            [-v|--verbose] [--timeout SECS] [--keep-registry]
+//!            [--no-color] [-h|--help] [-V|--version]
 //! ```
 
 use clap::{Parser, ValueEnum};
@@ -66,6 +66,12 @@ pub struct Cli {
     /// Kill any single manager that runs longer than this (seconds).
     #[arg(long, value_name = "SECS", default_value_t = 120)]
     pub timeout: u64,
+
+    /// cargo only: keep registry/cache and registry/src (the downloaded crates),
+    /// so the next build doesn't re-download them. git/db and git/checkouts
+    /// are still cleared.
+    #[arg(long)]
+    pub keep_registry: bool,
 
     /// Disable color output. Output is currently uncolored, so this is a no-op;
     /// it is accepted so scripts can pass it safely.

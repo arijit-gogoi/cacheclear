@@ -45,6 +45,7 @@ A single command that reclaims disk space from the accumulated caches of every l
 | 11 | Extra managers (poetry, yarn, deno, go, gem, maven, gradle, nuget) | 📋 Planned | Low | Post-v1 |
 | 12 | Config file `~/.config/cacheclear/config.toml` for defaults | 📋 Planned | Low | Post-v1 |
 | 13 | `--aggressive` vs `--safe` profiles | ⏸ Deferred | Low | Unclear it adds value; revisit after real use |
+| 14 | `--keep-registry` — cargo keeps `registry/cache` + `registry/src`, clears only `git/db` + `git/checkouts` | ✅ Done | Medium | A full clear makes the next cargo build re-download every crate. Added 2026-11-27. |
 
 ---
 
@@ -57,7 +58,7 @@ This is the contract. For each supported manager, here is the exact action taken
 | **uv** | `uv --version` | `uv cache clean` | Clears download/build cache; does not remove installed tools/projects. |
 | **pip** | `pip --version` (and try `pip3` as fallback) | `pip cache purge` | Documented cache-only command; never uninstalls. |
 | **pipx** | `pipx --version` | Delete contents of every pipx venv cache dir that exists: `$PIPX_HOME/.cache` if set; pipx's own answer (`pipx environment --value PIPX_VENV_CACHEDIR`, plus `<PIPX_HOME>/.cache` left over from pre-1.3 layouts); else defaults `%LOCALAPPDATA%\pipx\pipx\Cache` (Windows), `~/Library/Caches/pipx` (macOS), `$XDG_CACHE_HOME/pipx` or `~/.cache/pipx` (Linux), and legacy `~/.local/pipx/.cache` / `~\pipx\.cache`. **Do NOT touch `venvs/`.** | pipx has no `cache clean` command ([pypa/pipx#1681](https://github.com/pypa/pipx/issues/1681)). Cache dir stores only ephemeral `pipx run` envs. |
-| **cargo** | `cargo --version` | Delete contents of these dirs under `$CARGO_HOME` (default `~/.cargo`): `registry/cache/*`, `registry/src/*`, `git/db/*`, `git/checkouts/*`. **Do NOT touch `bin/` or `registry/index/`.** | Cargo has no cache command. These four dirs are documented as "safe to delete, will be re-downloaded." |
+| **cargo** | `cargo --version` | Delete contents of these dirs under `$CARGO_HOME` (default `~/.cargo`): `registry/cache/*`, `registry/src/*`, `git/db/*`, `git/checkouts/*`. With `--keep-registry`: only `git/db/*`, `git/checkouts/*`. **Do NOT touch `bin/` or `registry/index/`.** | Cargo has no cache command. These four dirs are documented as "safe to delete, will be re-downloaded." |
 | **npm** | `npm --version` | `npm cache clean --force` | `--force` is required by npm; command only removes cache, not installed packages. |
 | **pnpm** | `pnpm --version` | `pnpm store prune` | Removes unreferenced packages from the content-addressable store. Do NOT delete the store dir wholesale — that would break every pnpm project symlinking into it. |
 | **bun** | `bun --version` | `bun pm --global cache rm` | Clears `~/.bun/install/cache`. Does not uninstall anything. The `--global` flag is required: `bun pm cache rm` without it operates on the *local* project's `node_modules` cache (errors when no project context exists), which is not what we want. |
@@ -156,6 +157,8 @@ OPTIONS:
   --json               Emit machine-readable result to stdout
   -v, --verbose        Stream child process output
   --timeout <secs>     Kill any single manager that runs longer (default: 120)
+  --keep-registry      cargo only: keep registry/cache and registry/src,
+                       clear only git/db and git/checkouts
   --no-color           Disable color output
   -h, --help           Show help
   -V, --version        Show version
