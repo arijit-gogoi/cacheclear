@@ -123,9 +123,9 @@ These aren't aspirational. They're tested on Linux, macOS, and Windows in CI.
 
 ## Status & roadmap
 
-- **0.2.0 (unreleased):** adds `--keep-registry` and the scoop manager, and fixes mixed path separators (`.cargo\registry/cache`) in Windows dry-run and `--json` output. Until it is published, `cargo install cacheclear` gets 0.1.0; build from source to use these.
+- **0.2.0:** adds `--keep-registry` and the scoop manager, and fixes mixed path separators (`.cargo\registry/cache`) in Windows dry-run and `--json` output.
 - **Phase 1 — MVP (done):** parallel clear for all 7 managers, auto-detection, final status table, size reporting, `--only`/`--skip`/`--dry-run`/`-v`/`--timeout`, exit codes, sandboxed-home tests, CI on three OSes.
-- **Phase 2 — polish & distribution (in progress):** done: `--json` output with schema, live status board, `cargo-dist` release config (Linux/macOS x86_64 + aarch64, Windows x86_64; shell and PowerShell installers). v0.1.0 published to crates.io with GitHub release binaries. Not yet: Homebrew formula.
+- **Phase 2 — polish & distribution (in progress):** done: `--json` output with schema, live status board, `cargo-dist` release config (Linux/macOS x86_64 + aarch64, Windows x86_64; shell and PowerShell installers). Releases (0.1.0, 0.2.0) are published to crates.io with GitHub release binaries. Not yet: Homebrew formula.
 - **Phase 3 — more managers:** done: scoop (Windows). Next: poetry, yarn (classic + berry), deno, go, gem, nuget, composer, maven, gradle.
 
 See [`spec/SPEC.md`](spec/SPEC.md) for the full design rationale.
