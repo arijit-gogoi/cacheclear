@@ -21,7 +21,7 @@ Total: 5.1 GB freed in 1m 10s (7/7 ran, 0 skipped, 0 failed)
 
 Every package manager you use silently piles download and build artifacts into its cache: cargo's `~/.cargo/registry/src`, npm's `_cacache`, pnpm's content-addressable store, pip's wheel cache, and so on. On a polyglot dev machine these add up to **tens of gigabytes** that nobody asked for.
 
-`cacheclear` runs the documented cache-clearing command for each manager **in parallel**, reports what was freed, and is paranoid about one specific thing: it will **never** remove anything you'd consider installed. No binaries from `~/.cargo/bin`, no pipx venvs, no npm/pnpm/bun globally installed packages, no system package managers. The only thing it touches is cache.
+`cacheclear` runs the documented cache-clearing command for each manager **in parallel**, reports what was freed, and is paranoid about one specific thing: it will **never** remove anything you'd consider installed. No binaries from `~/.cargo/bin`, no pipx venvs, no npm/pnpm/bun globally installed packages, no scoop apps (old versions included), no system package managers. The only thing it touches is cache.
 
 ## Install
 
@@ -55,7 +55,7 @@ cacheclear --timeout 60      # stop any single manager after 60 s (default 120)
 cacheclear --keep-registry   # cargo: keep downloaded crates, clear only its git caches
 ```
 
-Manager names for `--only` / `--skip`: `uv`, `pip`, `pipx`, `cargo`, `npm`, `pnpm`, `bun`. An unknown name is a usage error (exit 2), so a typo never widens a run. If both flags are given, `--only` applies first, then `--skip`. Managers filtered out are left out of the report.
+Manager names for `--only` / `--skip`: `uv`, `pip`, `pipx`, `cargo`, `npm`, `pnpm`, `bun`, `scoop` (Windows only). An unknown name is a usage error (exit 2), so a typo never widens a run. If both flags are given, `--only` applies first, then `--skip`. Managers filtered out are left out of the report.
 
 `--dry-run` prints a per-manager plan with concrete paths and a total:
 
@@ -93,12 +93,13 @@ Dry-run sizes are upper bounds for npm and pnpm: they measure the whole cache di
 | **npm**   | `npm cache clean --force` | The `--force` flag is required by npm itself — it refuses without it. |
 | **pnpm**  | `pnpm store prune` | Removes only unreferenced packages. **Never wipes the store dir** — every project on the machine links into it. |
 | **bun**   | `bun pm --global cache rm` | Clears `~/.bun/install/cache`. Doesn't uninstall anything. |
+| **scoop** (Windows) | `scoop cache rm -a` | Clears scoop's download cache (`~\scoop\cache`, or `SCOOP_CACHE` / config `cache_path`). **Never runs `scoop cleanup`**: that deletes old installed app versions, which `scoop reset` can roll back to. |
 
 ## Safety guarantees
 
 These aren't aspirational. They're tested on Linux, macOS, and Windows in CI.
 
-1. **No uninstall, ever.** The integration tests (`tests/no_uninstall.rs`) build a fake home containing both cache files (which we expect to delete) and "installed" files (`cargo/bin/`, `pipx/venvs/`, `~/.bashrc`, user data). After each run, every installed file must be **byte-identical** to before.
+1. **No uninstall, ever.** The integration tests (`tests/no_uninstall.rs`) build a fake home containing both cache files (which we expect to delete) and "installed" files (`cargo/bin/`, `pipx/venvs/`, scoop `apps/` with an old version, `~/.bashrc`, user data). After each run, every installed file must be **byte-identical** to before.
 
 2. **`--dry-run` touches nothing.** A test snapshots every file in the fake home before and after `--dry-run` and requires them to be identical.
 
@@ -124,7 +125,7 @@ These aren't aspirational. They're tested on Linux, macOS, and Windows in CI.
 
 - **Phase 1 — MVP (done):** parallel clear for all 7 managers, auto-detection, final status table, size reporting, `--only`/`--skip`/`--dry-run`/`-v`/`--timeout`, exit codes, sandboxed-home tests, CI on three OSes.
 - **Phase 2 — polish & distribution (in progress):** done: `--json` output with schema, live status board, `cargo-dist` release config (Linux/macOS x86_64 + aarch64, Windows x86_64; shell and PowerShell installers). v0.1.0 published to crates.io with GitHub release binaries. Not yet: Homebrew formula.
-- **Phase 3 — more managers:** poetry, yarn (classic + berry), deno, go, gem, nuget, composer, maven, gradle.
+- **Phase 3 — more managers:** done: scoop (Windows). Next: poetry, yarn (classic + berry), deno, go, gem, nuget, composer, maven, gradle.
 
 See [`spec/SPEC.md`](spec/SPEC.md) for the full design rationale.
 

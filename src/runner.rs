@@ -14,7 +14,7 @@
 //! Direct-deletion managers (cargo, pipx) compute `freed` themselves — they
 //! return `Manager::cache_dir() == None` and we trust their `freed` value.
 //!
-//! Subprocess managers (uv, pip, npm, pnpm, bun) don't expose freed-bytes
+//! Subprocess managers (uv, pip, npm, pnpm, bun, scoop) don't expose freed-bytes
 //! machine-readably — they return `freed: 0` from `execute`. They DO
 //! implement `cache_dir()`. The runner generically probes the dir before
 //! and after, replacing `freed: 0` with the real delta.

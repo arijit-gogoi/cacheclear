@@ -1,7 +1,7 @@
 //! Core `Manager` trait — the contract every cache cleaner implements.
 //!
 //! Two implementations exist in `managers/`:
-//! - subprocess managers (uv, pip, npm, pnpm, bun) shell out to a documented cache command
+//! - subprocess managers (uv, pip, npm, pnpm, bun, scoop) shell out to a documented cache command
 //! - direct-deletion managers (cargo, pipx) walk a cache directory and remove contents
 //!   under the rules in `fs_util` (canonicalize root, never follow symlinks below)
 
@@ -56,7 +56,7 @@ pub trait Manager: Send + Sync {
     /// Optional: the cache directory the runner can probe with `dir_size`
     /// before/after `execute()` to compute `freed_bytes` — used for
     /// subprocess managers that don't expose machine-readable freed-bytes
-    /// (npm, pnpm, bun, uv, pip).
+    /// (npm, pnpm, bun, uv, pip, scoop).
     ///
     /// Returns `None` for managers that compute `freed` themselves
     /// (cargo, pipx — both direct-deletion).

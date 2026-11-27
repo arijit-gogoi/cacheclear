@@ -8,7 +8,7 @@
   ],
   "$defs": {
     "manager": {
-      "enum": ["uv", "pip", "pipx", "cargo", "npm", "pnpm", "bun"]
+      "enum": ["uv", "pip", "pipx", "cargo", "npm", "pnpm", "bun", "scoop"]
     },
     "count": { "type": "integer", "minimum": 0 },
     "run": {

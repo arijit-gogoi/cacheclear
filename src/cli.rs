@@ -22,6 +22,7 @@ pub enum ManagerName {
     Npm,
     Pnpm,
     Bun,
+    Scoop,
 }
 
 impl ManagerName {
@@ -35,6 +36,7 @@ impl ManagerName {
             Self::Npm => "npm",
             Self::Pnpm => "pnpm",
             Self::Bun => "bun",
+            Self::Scoop => "scoop",
         }
     }
 }

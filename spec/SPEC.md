@@ -1,5 +1,5 @@
 # `cacheclear` — SPEC
-_Last updated: 2026-11-26_
+_Last updated: 2026-11-27_
 
 A Rust CLI that clears the download/build caches of common package managers in parallel, **without ever uninstalling anything**.
 
@@ -16,13 +16,13 @@ A single command that reclaims disk space from the accumulated caches of every l
 | Type | Item | Reason |
 |---|---|---|
 | **Anti-feature** | **Must NEVER uninstall or remove installed packages/binaries** | Core safety invariant. The tool only ever touches caches. |
-| Anti-feature | Must not touch `$CARGO_HOME/bin`, `pipx venvs/`, npm/pnpm/bun global install dirs, uv's tool installs | These contain installed software, not cache. |
+| Anti-feature | Must not touch `$CARGO_HOME/bin`, `pipx venvs/`, npm/pnpm/bun global install dirs, uv's tool installs, scoop's `apps/` (including old versions) and `persist/` | These contain installed software, not cache. |
 | Anti-feature | Must not delete cargo's `registry/index/` by default | It's metadata, not download cache; deleting forces a full re-index on next build. |
 | Anti-feature | Run as sudo / modify system-level package caches (apt, brew, pacman, dnf) | Out of scope. Those have security implications and different semantics. |
 | Non-goal (v1) | GUI, TUI menu, interactive selection | CLI-first; keep MVP scope tight. |
 | Non-goal (v1) | Scheduled/cron-mode, daemon | User-invoked only. |
 | Non-goal (v1) | Config file | All behavior expressible through flags in v1. |
-| Constraint | Cross-platform (Linux, macOS, Windows) | These are where all seven package managers live. |
+| Constraint | Cross-platform (Linux, macOS, Windows) | These are where the supported package managers live. scoop is Windows-only; elsewhere it is skipped as not installed. |
 | Constraint | Zero-sudo, zero-elevation | Tool operates entirely on user-owned caches. |
 | Constraint | Per-manager guardrail: only use that manager's documented cache command (or documented cache directory) | No clever tricks. If the manager says "this is the cache dir", we trust it. |
 
@@ -46,6 +46,7 @@ A single command that reclaims disk space from the accumulated caches of every l
 | 12 | Config file `~/.config/cacheclear/config.toml` for defaults | 📋 Planned | Low | Post-v1 |
 | 13 | `--aggressive` vs `--safe` profiles | ⏸ Deferred | Low | Unclear it adds value; revisit after real use |
 | 14 | `--keep-registry` — cargo keeps `registry/cache` + `registry/src`, clears only `git/db` + `git/checkouts` | ✅ Done | Medium | A full clear makes the next cargo build re-download every crate. Added 2026-11-27. |
+| 15 | scoop manager (Windows): `scoop cache rm -a` | ✅ Done | Medium | First Phase 3 manager. Added 2026-11-27. Never `scoop cleanup` (see matrix). |
 
 ---
 
@@ -62,6 +63,7 @@ This is the contract. For each supported manager, here is the exact action taken
 | **npm** | `npm --version` | `npm cache clean --force` | `--force` is required by npm; command only removes cache, not installed packages. |
 | **pnpm** | `pnpm --version` | `pnpm store prune` | Removes unreferenced packages from the content-addressable store. Do NOT delete the store dir wholesale — that would break every pnpm project symlinking into it. |
 | **bun** | `bun --version` | `bun pm --global cache rm` | Clears `~/.bun/install/cache`. Does not uninstall anything. The `--global` flag is required: `bun pm cache rm` without it operates on the *local* project's `node_modules` cache (errors when no project context exists), which is not what we want. |
+| **scoop** | `scoop` shim on PATH (Windows only) | `scoop cache rm -a` (same as `scoop cache rm *`) | Deletes everything in scoop's download cache: `$SCOOP_CACHE`, else config `cache_path`, else `<root>\cache`. User-level; needs no elevation. **Never `scoop cleanup`**: it deletes old installed versions under `apps\<app>\`, which `scoop reset <app>@<version>` can switch back to. That is uninstalling. Its `-k` flag only adds outdated downloads, which `cache rm -a` already removes. |
 
 For each manager, if detection fails → mark as **Skipped** and continue. Never error out the whole run because one manager is missing.
 
@@ -78,7 +80,7 @@ Multiple cache trees contain or are themselves symlinks (pipx's `.cache/` epheme
 
 **Sanity check:** after canonicalizing the cache root, refuse to operate if the resolved path is at or above any of: `/`, `$HOME`, `/etc`, `/usr`, `/var`, `C:\`, `C:\Users`. A manager's "cache" resolving to a system root indicates a broken config, not a legitimate clear target — bail loudly and skip that manager.
 
-This policy applies uniformly to direct-deletion managers (cargo, pipx) and is irrelevant for the subprocess managers (uv, pip, npm, pnpm, bun) since they handle their own filesystem traversal.
+This policy applies uniformly to direct-deletion managers (cargo, pipx) and is irrelevant for the subprocess managers (uv, pip, npm, pnpm, bun, scoop) since they handle their own filesystem traversal.
 
 ---
 
@@ -105,7 +107,7 @@ If the lock is held by another process → mark as **Skipped (busy)** and contin
 
 A "skipped (busy)" run does **not** count as a failure — exit code stays 0.
 
-For the other five managers (uv, pip, pipx, npm, bun) we rely on either the manager's own subcommand handling concurrency, or on content-addressed caches being race-tolerant. No lock check needed.
+For the other managers (uv, pip, pipx, npm, bun, scoop) we rely on either the manager's own subcommand handling concurrency, or on content-addressed caches being race-tolerant. No lock check needed.
 
 ---
 
@@ -165,6 +167,8 @@ OPTIONS:
 
 MANAGERS (v1):
   uv  pip  pipx  cargo  npm  pnpm  bun
+ADDED IN 0.2.0:
+  scoop (Windows only)
 ```
 
 ### Example output (default run)
@@ -230,7 +234,8 @@ src/
 │   ├── cargo.rs        // direct dir removal
 │   ├── npm.rs
 │   ├── pnpm.rs
-│   └── bun.rs
+│   ├── bun.rs
+│   └── scoop.rs        // Windows only
 ├── runner.rs           // orchestrates parallel execution + timeouts
 ├── report.rs           // status board + summary + JSON emitter
 └── fs_util.rs          // prepare_root (canonicalize + \\?\ on Windows),
@@ -281,6 +286,7 @@ This way "shell out to a subcommand" and "delete a directory" are both just impl
 | Clearing `cargo/registry/index/` | It's metadata, not download cache. Removing it forces a slow re-index without meaningfully bigger space savings. |
 | Aggressive mode that wipes pnpm store entirely | Would break installed pnpm projects → violates the "never uninstall" guarantee. |
 | Including system package managers (apt, brew, pacman, dnf) | Requires sudo, has security-update implications, and caches behave differently (e.g. brew's cache is already pruned on upgrade). Out of scope. |
+| `scoop cleanup` (with or without `-k`) | Deletes old installed versions (`apps\<app>\<version>`) that `scoop reset` can roll back to, so it uninstalls → violates the "never uninstall" guarantee. `-g` also needs admin. Its cache part (`-k`) is a subset of `scoop cache rm -a`. |
 | Config file in v1 | Flags cover every v1 use case; premature abstraction. Revisit once real usage surfaces repeated patterns. |
 
 ---
@@ -331,6 +337,8 @@ This way "shell out to a subcommand" and "delete a directory" are both just impl
 **Goal:** Cover more of the ecosystem.
 
 **Candidates:** poetry, yarn (classic + berry), deno, go (module cache), gem, nuget, composer, maven (`~/.m2/repository`), gradle (`~/.gradle/caches`).
+
+**Done:** scoop (Windows), 2026-11-27, in 0.2.0.
 
 **Exit criteria:**
 - Each added manager has: detection, one clear action, one integration test, entry in the cache-clear matrix doc.

@@ -23,8 +23,9 @@
 //! the only managers detectable (via cache-dir existence).
 //!
 //! Other tests in this file cover `--only` / `--skip`, `--dry-run` touching
-//! nothing, a busy cargo lock, Windows long paths, `--keep-registry`, and
-//! path separators in the dry-run plan.
+//! nothing, a busy cargo lock, Windows long paths, `--keep-registry`, path
+//! separators in the dry-run plan, and (Windows only) scoop through a fake
+//! `scoop.cmd`.
 
 use assert_cmd::Command;
 use std::collections::BTreeMap;
@@ -41,6 +42,9 @@ struct FakeHome {
     cargo_cache: Vec<PathBuf>,
     /// pipx cache files: expected to be deleted when pipx runs.
     pipx_cache: Vec<PathBuf>,
+    /// scoop download-cache files: deleted by `scoop cache rm -a`.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    scoop_cache: Vec<PathBuf>,
     /// Paths that the tool MUST NOT delete or modify. Our invariant.
     installed_paths: Vec<PathBuf>,
 }
@@ -77,6 +81,7 @@ impl FakeHome {
 
         let mut cargo_cache = Vec::new();
         let mut pipx_cache = Vec::new();
+        let mut scoop_cache = Vec::new();
         let mut installed_paths = Vec::new();
 
         // ----- cargo: cache dirs (delete-allowed) + bin & registry/index (FORBIDDEN) -----
@@ -115,6 +120,27 @@ impl FakeHome {
             installed_paths.push(p);
         }
 
+        // ----- scoop: download cache (delete-allowed) + installed apps (FORBIDDEN),
+        // including an old version, which `scoop cleanup` would delete -----
+        let scoop = home.join("scoop");
+        for name in [
+            "foo#1.0#https_example.com_foo-1.0.zip",
+            "bar#2.3#https_example.com_bar-2.3.7z",
+        ] {
+            let p = scoop.join("cache").join(name);
+            write_with_parents(&p, b"scoop download cache\n")?;
+            scoop_cache.push(p);
+        }
+        for sub in [
+            "apps/foo/1.0/foo.exe",
+            "apps/foo/0.9/foo.exe",
+            "persist/foo/data.txt",
+        ] {
+            let p = scoop.join(sub);
+            write_with_parents(&p, b"INSTALLED APP via scoop\n")?;
+            installed_paths.push(p);
+        }
+
         // ----- random unrelated content (FORBIDDEN to touch) -----
         for sub in [
             "Documents/secret.txt",
@@ -130,6 +156,7 @@ impl FakeHome {
             root,
             cargo_cache,
             pipx_cache,
+            scoop_cache,
             installed_paths,
         })
     }
@@ -144,6 +171,7 @@ impl FakeHome {
     /// - CARGO_HOME → fake `$HOME/.cargo`
     /// - PIPX_HOME / XDG_CACHE_HOME unset (env cleared), so defaults are used
     /// - PATH → one empty dir, so no real package manager is detected
+    /// - SystemRoot and PATHEXT kept (Windows)
     fn run(&self, args: &[&str]) -> Output {
         let home = self.home();
         let fake_path = home.join("__no_real_binaries__");
@@ -160,6 +188,10 @@ impl FakeHome {
         // SystemRoot is required on Windows for many syscalls; preserve it.
         if let Ok(sr) = std::env::var("SystemRoot") {
             cmd.env("SystemRoot", sr);
+        }
+        // Without PATHEXT, `which` can't find `.cmd` shims such as a fake `scoop.cmd`.
+        if let Ok(pe) = std::env::var("PATHEXT") {
+            cmd.env("PATHEXT", pe);
         }
 
         let output = cmd.output().expect("running cacheclear");
@@ -466,5 +498,53 @@ fn keep_registry_clears_only_cargo_git_dirs() {
         .collect();
     assert_eq!(git.len(), 2, "expected the git/db and git/checkouts fixtures");
     assert_all_gone(&git);
+    assert_installed_untouched(&installed_before);
+}
+
+/// scoop runs exactly `scoop cache rm -a`, never `scoop cleanup`, and its
+/// freed size is measured on scoop's cache dir. A fake `scoop.cmd` logs its
+/// arguments and empties `~\scoop\cache` the way the real command does.
+#[cfg(windows)]
+#[test]
+fn scoop_runs_only_cache_rm_all() {
+    let fake = FakeHome::new().expect("setting up fake $HOME");
+    let installed_before = fake.snapshot_installed();
+    let bin_dir = fake.home().join("__no_real_binaries__");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::write(
+        bin_dir.join("scoop.cmd"),
+        "@echo off\r\n\
+         echo %*>>\"%~dp0scoop-calls.txt\"\r\n\
+         if \"%*\"==\"cache rm -a\" del /q \"%USERPROFILE%\\scoop\\cache\\*\"\r\n",
+    )
+    .unwrap();
+    let calls = bin_dir.join("scoop-calls.txt");
+    let cache_bytes: u64 = fake
+        .scoop_cache
+        .iter()
+        .map(|p| fs::metadata(p).unwrap().len())
+        .sum();
+
+    let json = |args: &[&str]| -> serde_json::Value {
+        let output = fake.run(args);
+        assert!(output.status.success(), "args {args:?}");
+        serde_json::from_slice(&output.stdout).expect("stdout is one JSON document")
+    };
+
+    let plan = json(&["--dry-run", "--json", "--only", "scoop"]);
+    assert_eq!(plan["plan"][0]["manager"], "scoop");
+    assert_eq!(plan["plan"][0]["would_free_bytes"], cache_bytes);
+    assert!(!calls.exists(), "--dry-run ran scoop");
+
+    let run = json(&["--json", "--only", "scoop"]);
+    assert_eq!(run["results"][0]["manager"], "scoop");
+    assert_eq!(run["results"][0]["outcome"], "done");
+    assert_eq!(run["results"][0]["freed_bytes"], cache_bytes);
+    assert_eq!(
+        fs::read_to_string(&calls).unwrap().trim(),
+        "cache rm -a",
+        "scoop must be called once, with `cache rm -a` only"
+    );
+    assert_all_gone(&fake.scoop_cache);
     assert_installed_untouched(&installed_before);
 }

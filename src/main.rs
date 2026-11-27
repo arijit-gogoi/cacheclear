@@ -42,6 +42,7 @@ async fn main() -> Result<()> {
         Arc::new(managers::npm::Npm),
         Arc::new(managers::pnpm::Pnpm),
         Arc::new(managers::bun::Bun),
+        Arc::new(managers::scoop::Scoop),
     ];
     // Filter once, before the dry-run / real-run split, so both paths see
     // the same set. Filtered-out managers are dropped from the report.
@@ -132,6 +133,7 @@ mod tests {
             Arc::new(managers::npm::Npm),
             Arc::new(managers::pnpm::Pnpm),
             Arc::new(managers::bun::Bun),
+            Arc::new(managers::scoop::Scoop),
         ]
     }
 
@@ -157,14 +159,14 @@ mod tests {
     #[test]
     fn select_only_then_skip() {
         use ManagerName::*;
-        assert_eq!(names(&select_managers(all(), None, &[])).len(), 7);
+        assert_eq!(names(&select_managers(all(), None, &[])).len(), 8);
         assert_eq!(
             names(&select_managers(all(), Some(&[Npm, Cargo]), &[])),
             ["cargo", "npm"]
         );
         assert_eq!(
             names(&select_managers(all(), None, &[Npm, Pnpm, Bun])),
-            ["uv", "pip", "pipx", "cargo"]
+            ["uv", "pip", "pipx", "cargo", "scoop"]
         );
         assert_eq!(
             names(&select_managers(all(), Some(&[Npm, Cargo]), &[Npm])),
